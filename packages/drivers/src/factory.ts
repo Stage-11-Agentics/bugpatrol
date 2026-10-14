@@ -4,6 +4,7 @@ import { ApiDriver } from './api.js';
 import { CliDriver } from './cli.js';
 import { CuaDriver } from './cua/driver.js';
 import { ElectronDriver } from './electron.js';
+import { HandsetDriver } from './handset.js';
 import { MaestroDriver } from './maestro.js';
 import type { Driver } from './types.js';
 import { WebDriver } from './web.js';
@@ -63,6 +64,14 @@ export function createDriver(
       throw new ConfigError('Electron driver requires app.connect.cdp');
     }
     return new ElectronDriver(vars(connect.cdp), connect.allowedOrigins.map(vars));
+  }
+  if (connect.handset) {
+    return new HandsetDriver(platform, {
+      lease: vars(connect.handset.lease),
+      bin: vars(connect.handset.bin),
+      timeoutMs: connect.handset.timeoutMs,
+      appId: connect.appId ? vars(connect.appId) : undefined,
+    });
   }
   if (!connect.appId) {
     throw new ConfigError(`${platform} driver requires app.connect.appId`);
