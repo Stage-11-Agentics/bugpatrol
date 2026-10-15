@@ -20,7 +20,7 @@ import {
   type ScreenTransition,
   shortHash,
 } from '@bugpatrol/core';
-import type { DriverAction, Observation, UiElement } from '@bugpatrol/drivers';
+import { type DriverAction, elementTitle, type Observation, type UiElement } from '@bugpatrol/drivers';
 import { addOccurrence, evaluateScreen } from '../evaluate.js';
 import { bugMisses, replayRoutine } from '../replay.js';
 import type { AgentSession } from '../session.js';
@@ -53,10 +53,11 @@ function elementLine(element: UiElement): string {
   ]
     .filter(Boolean)
     .join(' ');
-  return (
-    `[${element.ref}] ${element.role} ${JSON.stringify(element.name)}` +
-    ` (${box.x},${box.y} ${box.width}x${box.height})${flags ? ` ${flags}` : ''}`
-  );
+  // A control with no name is listed by its role, its place and the name nearest it; tap it by ref.
+  const name = element.name
+    ? JSON.stringify(element.name)
+    : `(unnamed${element.near ? `, near ${JSON.stringify(element.near)}` : ''})`;
+  return `[${element.ref}] ${element.role} ${name} (${box.x},${box.y} ${box.width}x${box.height})${flags ? ` ${flags}` : ''}`;
 }
 
 /** What the app logged since the last observation: the signals that a screenshot does not show. */
@@ -168,7 +169,10 @@ function bugFingerprint(input: {
       .trim();
   const exact = (value = '') => value.toLowerCase().replace(/\s+/g, ' ').trim();
   const { element, bug } = input;
-  const named = (item: UiElement) => `${item.role}:${words(item.name)}`;
+  // A control with no name is the one near its nearest name, which holds while other unnamed controls come and go.
+  // `~` never survives words(), so these keys cannot meet a name such as "+" whose words are empty.
+  const named = (item: UiElement) =>
+    `${item.role}:${item.name ? words(item.name) : item.near ? `~near ${words(item.near)}` : '~unnamed'}`;
   const twins = element ? input.elements.filter((item) => !item.testId && named(item) === named(element)) : [];
   const subject = element
     ? element.testId
@@ -203,7 +207,11 @@ function transition(session: AgentSession, to: string): ScreenTransition | undef
         : 'other';
   const label =
     last.kind === 'tap'
-      ? (last.target.name ?? last.target.text ?? last.target.testId ?? 'tap')
+      ? last.target.name ||
+        (last.target.near ? `near ${last.target.near}` : '') ||
+        last.target.text ||
+        last.target.testId ||
+        'tap'
       : last.kind === 'open'
         ? `open ${last.url}`
         : last.kind === 'window'
@@ -215,7 +223,7 @@ function transition(session: AgentSession, to: string): ScreenTransition | undef
               : last.kind === 'press'
                 ? `press ${last.key}`
                 : last.kind === 'type'
-                  ? (last.target?.name ?? 'submit')
+                  ? last.target?.name || (last.target?.near ? `near ${last.target.near}` : '') || 'submit'
                   : last.kind;
   const via = (session.vars.redact(label) as string).slice(0, 60);
   return { to, kind, via, steps: actions.length, count: 1, lastSeenAt: new Date().toISOString() };
@@ -260,7 +268,7 @@ function currentScreenId(session: AgentSession): string | undefined {
 function describe(session: AgentSession, action: DriverAction): string {
   const named = (ref?: string) => {
     const element = ref ? session.lastObservation?.elements.find((item) => item.ref === ref) : undefined;
-    return element ? `"${element.name}"` : 'the screen';
+    return element ? elementTitle(element) : 'the screen';
   };
   switch (action.kind) {
     case 'tap':
@@ -313,7 +321,9 @@ function resolveOldRef(session: AgentSession, ref?: string): { ref: string; mess
   const old = session.previousObservation?.elements.find((item) => item.ref === ref);
   if (!old) return;
   const matches =
-    session.lastObservation?.elements.filter((item) => item.role === old.role && item.name === old.name) ?? [];
+    session.lastObservation?.elements.filter(
+      (item) => item.role === old.role && item.name === old.name && item.near === old.near,
+    ) ?? [];
   const center = (box: UiElement['box']) => ({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
   const from = center(old.box);
   const nearest = matches
@@ -322,7 +332,7 @@ function resolveOldRef(session: AgentSession, ref?: string): { ref: string; mess
   if (!nearest || (matches.length > 1 && nearest.distance > 100)) return;
   return {
     ref: nearest.item.ref,
-    message: `Ref ${ref} was from an older screen; used ${nearest.item.ref} (${JSON.stringify(old.name)}).`,
+    message: `Ref ${ref} was from an older screen; used ${nearest.item.ref} (${elementTitle(old)}).`,
   };
 }
 
@@ -432,6 +442,7 @@ function locatorSignature(locator?: Locator): string {
   if (!locator) return '';
   if (locator.testId) return `id:${locator.testId}`;
   if (locator.role && locator.name) return `role:${locator.role}:${locator.name}`;
+  if (locator.role && locator.near) return `near:${locator.role}:${locator.near}`;
   if (locator.text) return `text:${locator.text}`;
   if (locator.selector) return `selector:${locator.selector}`;
   return `point:${locator.point?.x},${locator.point?.y}`;

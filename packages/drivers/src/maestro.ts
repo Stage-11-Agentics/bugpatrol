@@ -314,8 +314,17 @@ export function nativeSnapshot(observation: Observation, screenId: string): Scre
     },
     url: observation.location,
     title: observation.title,
-    elements: observation.elements.map((element) => {
-      const selector = element.testId ? `id=${element.testId}` : `text=${element.name}`;
+    elements: observation.elements.map((element, index, all) => {
+      const unnamed = (item: UiElement) => `unnamed ${item.role}${item.near ? ` near ${item.near}` : ''}`;
+      // Unnamed controls can share a description; a baseline compares by selector, so each gets its own.
+      const twin = element.name
+        ? 0
+        : all.slice(0, index).filter((item) => !item.name && !item.testId && unnamed(item) === unnamed(element)).length;
+      const selector = element.testId
+        ? `id=${element.testId}`
+        : element.name
+          ? `text=${element.name}`
+          : `${unnamed(element)}${twin ? ` #${twin + 1}` : ''}`;
       return {
         selector,
         box: element.box,

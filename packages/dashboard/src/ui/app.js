@@ -998,15 +998,17 @@ function issueStatus(issue, fix) {
 }
 
 function stepWords(step) {
-  const target = step.target?.name || step.target?.text || step.target?.testId || step.target?.selector || 'target';
-  if (step.kind === 'tap') return `Tap "${target}"`;
+  const unnamed = step.target?.near ? `the unnamed ${step.target.role || 'control'} near "${step.target.near}"` : '';
+  const named = step.target?.name || step.target?.text || step.target?.testId || step.target?.selector;
+  const target = step.target?.name || !unnamed ? `"${named || 'target'}"` : unnamed;
+  if (step.kind === 'tap') return `Tap ${target}`;
   if (step.kind === 'type') return `Type "${step.value}"${step.submit ? ' and submit' : ''}`;
   if (step.kind === 'press') return `Press ${step.key}`;
   if (step.kind === 'scroll') return `Scroll ${step.direction}`;
   if (step.kind === 'open') return `Open ${step.url}`;
   if (step.kind === 'wait') return `Wait ${step.ms} ms`;
   if (step.kind === 'window') return `Switch to window "${step.match}"`;
-  if (step.kind === 'upload') return `Upload a sample ${step.file} file to "${target}"`;
+  if (step.kind === 'upload') return `Upload a sample ${step.file} file to ${target}`;
   return step.kind === 'back' ? 'Go back' : step.kind;
 }
 

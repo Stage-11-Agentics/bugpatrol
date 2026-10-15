@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Locator, Platform } from '@bugpatrol/core';
 import type { ScreenSnapshot } from '@bugpatrol/invariants';
-import { locatorFor, stepFor } from './dom.js';
+import { elementTitle, locatorFor, stepFor } from './dom.js';
 import { nativeSnapshot, pruneSystemChrome } from './maestro.js';
-import { tapPoint } from './occlusion.js';
+import { inside, tapPoint } from './occlusion.js';
 import type { ActResult, Driver, DriverAction, Observation, UiElement } from './types.js';
 
 /**
@@ -94,35 +94,45 @@ const defaultExec =
 const STATUS_BAR = { ios: 54, android: 24 } as const;
 const TEXTBOX = /TextField|SecureTextField|SearchField|TextView|EditText/i;
 const BUTTON = /Button|Cell|Link|Tab|MenuItem|Switch|Toggle|CheckBox|Slider|Picker|ImageButton/i;
+/** Android's label class and its subclasses. iOS's TextView, and Android's EditText and AutoCompleteTextView, take text. */
+const ANDROID_LABEL = /^[\w.]+\.(\w*(?<!Edit|AutoComplete))TextView$/;
+/** Types that hold controls rather than being one. With no name, one is dropped when something kept lies inside it. */
+const HOLDER =
+  /Table|TabBar|TabGroup|TabLayout|TabWidget|TabHost|Toolbar|NavigationBar|CollectionView|ScrollView|Cell|List|Grid|Group/i;
 
 /** The Handset tree in Bugpatrol's normalised element shape, with system chrome removed. */
 export function handsetElements(tree: HandsetTree, platform: 'ios' | 'android'): UiElement[] {
   const seen = new Set<string>();
   const elements: UiElement[] = [];
+  const holders = new Set<UiElement>();
   for (const node of tree.elements) {
     const box = node.frame;
     if (!box || box.width <= 0 || box.height <= 0) continue;
     const name = (node.label || node.name || node.text || node.value || node.id || '').trim();
-    if (!name) continue;
+    const type = node.type ?? '';
+    const role = ANDROID_LABEL.test(type)
+      ? 'text'
+      : TEXTBOX.test(type)
+        ? 'textbox'
+        : BUTTON.test(type)
+          ? type.match(/Switch|Toggle|CheckBox/i)
+            ? 'switch'
+            : 'button'
+          : /StaticText|TextView$/i.test(type)
+            ? 'text'
+            : /Image/i.test(type)
+              ? 'image'
+              : 'group';
+    const interactive = role === 'button' || role === 'textbox' || role === 'switch';
+    // A control with no name is still a control: Hum's toggles are buttons with no label.
+    if (!name && !interactive) continue;
     // iOS reports a static text twice, once by identifier and once by value, on one frame.
     const key = `${node.label ?? name}|${box.x},${box.y},${box.width},${box.height}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const type = node.type ?? '';
-    const role = TEXTBOX.test(type)
-      ? 'textbox'
-      : BUTTON.test(type)
-        ? type.match(/Switch|Toggle|CheckBox/i)
-          ? 'switch'
-          : 'button'
-        : /StaticText|TextView$/i.test(type)
-          ? 'text'
-          : /Image/i.test(type)
-            ? 'image'
-            : 'group';
     // An id equal to the visible label is the platform's fallback, not an identifier the app set.
     const testId = node.id && node.id !== (node.label || node.name) ? node.id : undefined;
-    elements.push({
+    const element: UiElement = {
       ref: '',
       role,
       name,
@@ -130,11 +140,90 @@ export function handsetElements(tree: HandsetTree, platform: 'ios' | 'android'):
       value: node.value || undefined,
       testId,
       box: { x: box.x, y: box.y, width: box.width, height: box.height },
-      interactive: role === 'button' || role === 'textbox' || role === 'switch',
+      interactive,
       enabled: true,
-    });
+    };
+    elements.push(element);
+    if (!name && HOLDER.test(type)) holders.add(element);
   }
-  return pruneSystemChrome(elements, { width: tree.w, height: tree.h }, STATUS_BAR[platform]);
+  // An unnamed table, tab bar or cell is dropped when what it holds names itself; a cell of
+  // unnamed images (a swatch or photo grid) is kept, since nothing else would reach it. Inner first.
+  const byArea = [...holders].sort((p, q) => p.box.width * p.box.height - q.box.width * q.box.height);
+  for (const holder of byArea) {
+    if (elements.some((item) => item !== holder && !holders.has(item) && inside(item.box, holder.box))) {
+      holders.delete(holder);
+      elements.splice(elements.indexOf(holder), 1);
+    } else {
+      holders.delete(holder);
+    }
+  }
+  const kept = pruneSystemChrome(elements, { width: tree.w, height: tree.h }, STATUS_BAR[platform]);
+  // Tap units are points on iOS and pixels on Android, so the reach is a share of the screen's width.
+  const reach = tree.w * NEAR_ROW;
+  return kept.map((element) => {
+    const near = element.name ? undefined : nearestName(element, kept, reach, tree.w / 402);
+    return near ? { ...element, near } : element;
+  });
+}
+
+/** How far above or below an unnamed control a name may be when its own row has none: 44 points on a 402-point phone. */
+const NEAR_ROW = 0.11;
+
+/**
+ * The name that tells an unnamed control apart. Its own label, drawn inside
+ * it, first. Then its row: the name that starts its part of the row, which is
+ * the leftmost name before it with no other control between them (a settings
+ * row puts its label at the far left, then perhaps a value, then the
+ * toggle); else the nearest name after it (a checkbox before its label).
+ * Then the row just above or below, within `reach`. Texts are searched
+ * first, then images (a leading icon), then other controls, whose name would
+ * read as that control. An element that holds the control is around it, not
+ * near it. `unit` is tap units per point.
+ */
+function nearestName(target: UiElement, elements: UiElement[], reach: number, unit: number): string | undefined {
+  const a = target.box;
+  const area = (box: UiElement['box']) => box.width * box.height;
+  const sameRow = (b: UiElement['box']) => b.y < a.y + a.height && a.y < b.y + b.height;
+  const rowControls = elements.filter((item) => item !== target && item.interactive && sameRow(item.box));
+  const between = (b: UiElement['box']) => {
+    const [left, right] = b.x + b.width / 2 < a.x ? [b.x + b.width, a.x] : [a.x + a.width, b.x];
+    return rowControls.some((c) => c.box.x >= left - 1 && c.box.x + c.box.width <= right + 1);
+  };
+  const gap = (b: UiElement['box']) => ({
+    dx: Math.max(0, b.x - (a.x + a.width), a.x - (b.x + b.width)),
+    dy: Math.max(0, b.y - (a.y + a.height), a.y - (b.y + b.height)),
+  });
+  // The first of the least, so a tie (within 2 points) goes to tree order.
+  const least = (items: UiElement[], score: (item: UiElement) => number) => {
+    const low = Math.min(...items.map(score));
+    return items.find((item) => score(item) <= low + 2 * unit);
+  };
+  const pick = (pool: UiElement[]) => {
+    const own = pool.find((item) => inside(item.box, a));
+    if (own) return own;
+    const row = pool.filter((item) => sameRow(item.box) && !between(item.box));
+    const before = row.filter((item) => item.box.x + item.box.width / 2 < a.x);
+    return (
+      least(before, (item) => item.box.x) ??
+      least(
+        row.filter((item) => !before.includes(item)),
+        (item) => gap(item.box).dx,
+      ) ??
+      least(
+        pool.filter((item) => !sameRow(item.box) && gap(item.box).dy <= reach),
+        (item) => gap(item.box).dy * 2 + gap(item.box).dx,
+      )
+    );
+  };
+  const candidates = elements.filter(
+    (item) =>
+      item !== target && item.name && item.role !== 'keyboard' && !(inside(a, item.box) && area(item.box) > area(a)),
+  );
+  const found =
+    pick(candidates.filter((item) => item.role === 'text')) ??
+    pick(candidates.filter((item) => !item.interactive && item.role !== 'text')) ??
+    pick(candidates.filter((item) => item.interactive));
+  return found?.name.slice(0, 40);
 }
 
 /**
@@ -308,7 +397,7 @@ export class HandsetDriver implements Driver {
       const at = tapPoint(element, this.lastObservation?.elements ?? [element]);
       if ('hidden' in at) {
         throw new HiddenTarget(
-          `Not tapped: ${JSON.stringify(element.name)} is covered by ${JSON.stringify(at.hidden.name)} and does not show. Scroll it into view or close what covers it, then look again.`,
+          `Not tapped: ${elementTitle(element)} is covered by ${elementTitle(at.hidden)} and does not show. Scroll it into view or close what covers it, then look again.`,
         );
       }
       await this.call('tap', ['--x', String(at.x), '--y', String(at.y)]);

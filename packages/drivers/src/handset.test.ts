@@ -121,6 +121,198 @@ describe('handsetElements', () => {
   });
 });
 
+/** Hum's eq tab: each section header has a pill toggle, a Button with no label, at the end of its row. */
+const hum: HandsetTree = {
+  ...tree,
+  elements: [
+    { ref: '@e1', type: 'Other', frame: { x: 0, y: 380, width: 402, height: 300 } },
+    { ref: '@e2', type: 'StaticText', label: 'NOTCH FILTER', frame: { x: 20, y: 412, width: 98, height: 14 } },
+    { ref: '@e3', type: 'Button', label: '', frame: { x: 336, y: 406, width: 46, height: 26 } },
+    { ref: '@e4', type: 'StaticText', label: 'frequency', frame: { x: 20, y: 446, width: 60, height: 13 } },
+    { ref: '@e5', type: 'StaticText', label: 'BINAURAL BEATS', frame: { x: 20, y: 560, width: 120, height: 14 } },
+    { ref: '@e6', type: 'Button', frame: { x: 336, y: 554, width: 46, height: 26 } },
+    { ref: '@e7', type: 'Image', frame: { x: 30, y: 640, width: 20, height: 20 } },
+    { ref: '@e8', type: 'Button', frame: { x: 180, y: 780, width: 40, height: 40 } },
+  ],
+};
+
+describe('handsetElements with unnamed controls', () => {
+  const elements = handsetElements(hum, 'ios');
+
+  it('keeps a control with no name, named by the text on its row', () => {
+    expect(elements.map((element) => [element.ref, element.role, element.name, element.near])).toEqual([
+      ['e1', 'text', 'NOTCH FILTER', undefined],
+      ['e2', 'button', '', 'NOTCH FILTER'],
+      ['e3', 'text', 'frequency', undefined],
+      ['e4', 'text', 'BINAURAL BEATS', undefined],
+      ['e5', 'button', '', 'BINAURAL BEATS'],
+      ['e6', 'button', '', undefined],
+    ]);
+    expect(elements[1]).toMatchObject({ interactive: true, box: { x: 336, y: 406, width: 46, height: 26 } });
+  });
+
+  it('drops a group or an image with no name, as before', () => {
+    expect(elements.some((element) => element.role === 'group' || element.role === 'image')).toBe(false);
+  });
+
+  it("takes the row's leading label over a value or a state line beside it", () => {
+    const near = (elements: HandsetTree['elements'], w = 402) =>
+      handsetElements({ ...hum, w, elements }, 'ios')
+        .filter((element) => !element.name)
+        .map((element) => element.near);
+    // Hum's noise header: the title, a subtitle that changes with the color, then the source toggle.
+    expect(
+      near([
+        { type: 'StaticText', label: 'NOISE', frame: { x: 18, y: 100, width: 52, height: 16 } },
+        { type: 'StaticText', label: 'blue · +3 dB/oct', frame: { x: 18, y: 119, width: 104, height: 13 } },
+        { type: 'Button', frame: { x: 338, y: 104, width: 46, height: 26 } },
+      ]),
+    ).toEqual(['NOISE']);
+    // A settings row: label, value, toggle. And two such pairs on one row.
+    expect(
+      near([
+        { type: 'StaticText', label: 'Sleep timer', frame: { x: 20, y: 300, width: 90, height: 20 } },
+        { type: 'StaticText', label: '12 min', frame: { x: 250, y: 300, width: 60, height: 20 } },
+        { type: 'Button', frame: { x: 336, y: 297, width: 46, height: 26 } },
+      ]),
+    ).toEqual(['Sleep timer']);
+    expect(
+      near([
+        { type: 'StaticText', label: 'Left', frame: { x: 20, y: 300, width: 40, height: 20 } },
+        { type: 'Button', frame: { x: 140, y: 297, width: 46, height: 26 } },
+        { type: 'StaticText', label: 'Right', frame: { x: 220, y: 300, width: 40, height: 20 } },
+        { type: 'Button', frame: { x: 336, y: 297, width: 46, height: 26 } },
+      ]),
+    ).toEqual(['Left', 'Right']);
+    // Its own label inside it; a checkbox before its label; text over another control's name.
+    expect(
+      near([
+        { type: 'Button', frame: { x: 20, y: 300, width: 120, height: 40 } },
+        { type: 'Image', label: 'play.fill', frame: { x: 30, y: 310, width: 20, height: 20 } },
+        { type: 'Button', frame: { x: 200, y: 400, width: 26, height: 26 } },
+        { type: 'StaticText', label: 'Agree', frame: { x: 236, y: 403, width: 60, height: 20 } },
+        { type: 'StaticText', label: 'Notifications', frame: { x: 200, y: 470, width: 100, height: 20 } },
+        { type: 'Button', frame: { x: 200, y: 500, width: 26, height: 26 } },
+        { type: 'Button', label: 'Help', frame: { x: 240, y: 500, width: 40, height: 26 } },
+      ]),
+    ).toEqual(['play.fill', 'Agree', 'Notifications']);
+  });
+
+  it('takes a text before a leading icon, and breaks a near tie of left edges by tree order', () => {
+    const near = (elements: HandsetTree['elements']) =>
+      handsetElements({ ...hum, elements }, 'ios')
+        .filter((element) => !element.name)
+        .map((element) => element.near);
+    expect(
+      near([
+        { type: 'Image', label: 'bell.fill', frame: { x: 20, y: 300, width: 24, height: 24 } },
+        { type: 'StaticText', label: 'Notifications', frame: { x: 56, y: 302, width: 110, height: 20 } },
+        { type: 'Switch', frame: { x: 330, y: 297, width: 51, height: 31 } },
+      ]),
+    ).toEqual(['Notifications']);
+    expect(
+      near([
+        { type: 'StaticText', label: 'NOISE', frame: { x: 18, y: 100, width: 52, height: 16 } },
+        { type: 'StaticText', label: 'blue · +3 dB/oct', frame: { x: 17.5, y: 119, width: 104, height: 13 } },
+        { type: 'Button', frame: { x: 338, y: 104, width: 46, height: 26 } },
+      ]),
+    ).toEqual(['NOISE']);
+  });
+
+  it('reads Android labels as text, so a settings row names its switch by its label', () => {
+    const row = handsetElements(
+      {
+        w: 1080,
+        h: 2400,
+        unit: 'tap',
+        elements: [
+          { type: 'android.widget.TextView', text: 'Sleep timer', frame: { x: 48, y: 800, width: 260, height: 50 } },
+          { type: 'android.widget.TextView', text: '12 min', frame: { x: 640, y: 800, width: 140, height: 50 } },
+          { type: 'android.widget.Switch', frame: { x: 900, y: 790, width: 130, height: 70 } },
+          { type: 'android.widget.EditText', text: 'Rain', frame: { x: 48, y: 1000, width: 980, height: 100 } },
+        ],
+      },
+      'android',
+    );
+    expect(row.map((element) => [element.role, element.name || element.near])).toEqual([
+      ['text', 'Sleep timer'],
+      ['text', '12 min'],
+      ['switch', 'Sleep timer'],
+      ['textbox', 'Rain'],
+    ]);
+  });
+
+  it('reaches the next row by a share of the screen, since Android tap units are pixels', () => {
+    const android = handsetElements(
+      {
+        w: 1080,
+        h: 2400,
+        unit: 'tap',
+        elements: [
+          { type: 'android.widget.Button', frame: { x: 900, y: 1000, width: 120, height: 70 } },
+          { type: 'android.widget.TextView', text: 'Volume', frame: { x: 880, y: 1170, width: 160, height: 40 } },
+        ],
+      },
+      'android',
+    );
+    expect(android[0]!.near).toBe('Volume');
+  });
+
+  it('keeps an unnamed cell that holds nothing named, such as a swatch in a grid', () => {
+    const grid = handsetElements(
+      {
+        ...hum,
+        elements: [
+          { type: 'CollectionView', frame: { x: 0, y: 100, width: 402, height: 200 } },
+          { type: 'Cell', frame: { x: 20, y: 120, width: 80, height: 80 } },
+          { type: 'Image', frame: { x: 30, y: 130, width: 60, height: 60 } },
+          { type: 'Cell', frame: { x: 110, y: 120, width: 80, height: 80 } },
+          { type: 'android.google.material.tabs.TabLayout', frame: { x: 0, y: 790, width: 402, height: 60 } },
+          { type: 'android.widget.TextView', text: 'Rides', frame: { x: 20, y: 800, width: 100, height: 40 } },
+        ],
+      },
+      'ios',
+    );
+    expect(grid.map((element) => [element.role, element.name, element.box.x])).toEqual([
+      ['button', '', 20],
+      ['button', '', 110],
+      ['text', 'Rides', 20],
+    ]);
+  });
+
+  it('drops an unnamed table, tab bar or cell: its controls and texts name themselves', () => {
+    const holders = handsetElements(
+      {
+        ...hum,
+        elements: [
+          { type: 'Table', frame: { x: 0, y: 100, width: 402, height: 600 } },
+          { type: 'Cell', frame: { x: 0, y: 100, width: 402, height: 60 } },
+          { type: 'StaticText', label: 'Morning ride', frame: { x: 20, y: 120, width: 120, height: 20 } },
+          { type: 'TabBar', frame: { x: 0, y: 790, width: 402, height: 84 } },
+          { type: 'Button', label: 'History', frame: { x: 0, y: 790, width: 134, height: 50 } },
+        ],
+      },
+      'ios',
+    );
+    expect(holders.map((element) => element.name)).toEqual(['Morning ride', 'History']);
+  });
+
+  it('takes the text on the row above or below when its own row has none', () => {
+    const below = handsetElements(
+      {
+        ...hum,
+        elements: [
+          { type: 'Button', frame: { x: 336, y: 406, width: 46, height: 26 } },
+          { type: 'StaticText', label: 'far below', frame: { x: 20, y: 500, width: 60, height: 13 } },
+          { type: 'StaticText', label: 'volume', frame: { x: 330, y: 440, width: 60, height: 13 } },
+        ],
+      },
+      'ios',
+    );
+    expect(below[0]!.near).toBe('volume');
+  });
+});
+
 describe('appErrors', () => {
   it('reports the app and its crashes, not framework chatter', () => {
     expect(appErrors(lines, 0)).toEqual([
@@ -198,6 +390,67 @@ describe('HandsetDriver', () => {
     expect(result.ok).toBe(true);
     expect(calls.at(-1)).toEqual(['tap', '--lease', 'ls_1', '--x', '201', '--y', '452', '--json']);
     expect(result.step).toMatchObject({ kind: 'tap', target: { testId: 'dial-button' } });
+  });
+
+  it('taps a control with no name by its ref, at its centre, and records the point for replay', async () => {
+    const { calls, exec } = fake({});
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    (driver as unknown as { lastObservation: unknown }).lastObservation = { elements: handsetElements(hum, 'ios') };
+    const result = await driver.act({ kind: 'tap', ref: 'e2' });
+    expect(result.ok).toBe(true);
+    expect(calls.at(-1)).toEqual(['tap', '--lease', 'ls_1', '--x', '359', '--y', '419', '--json']);
+    expect(result.step).toMatchObject({ kind: 'tap', target: { role: 'button', point: { x: 359, y: 419 } } });
+  });
+
+  it('names a covered control with no name by the text on its row', async () => {
+    const { exec } = fake({});
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    const covered = structuredClone(hum);
+    covered.elements.push({ type: 'Button', label: 'Done', frame: { x: 300, y: 380, width: 102, height: 80 } });
+    (driver as unknown as { lastObservation: unknown }).lastObservation = {
+      elements: handsetElements(covered, 'ios'),
+    };
+    const result = await driver.act({ kind: 'tap', ref: 'e2' });
+    expect(result.error).toContain('Not tapped: the unnamed button near "NOTCH FILTER" is covered by "Done"');
+  });
+
+  it('taps a text through the unnamed button drawn over it, which is its own control', async () => {
+    const { calls, exec } = fake({});
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    (driver as unknown as { lastObservation: unknown }).lastObservation = {
+      elements: handsetElements(
+        {
+          ...hum,
+          elements: [
+            { type: 'StaticText', label: 'Rain', frame: { x: 40, y: 300, width: 60, height: 20 } },
+            { type: 'Button', frame: { x: 20, y: 290, width: 362, height: 40 } },
+          ],
+        },
+        'ios',
+      ),
+    };
+    expect((await driver.act({ kind: 'tap', ref: 'e1' })).ok).toBe(true);
+    expect(calls.at(-1)).toEqual(['tap', '--lease', 'ls_1', '--x', '70', '--y', '310', '--json']);
+  });
+
+  it('does not tap a control through an unnamed scrim drawn over it', async () => {
+    const { calls, exec } = fake({});
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    (driver as unknown as { lastObservation: unknown }).lastObservation = {
+      elements: handsetElements(
+        {
+          ...hum,
+          elements: [
+            { type: 'Button', label: 'Delete', frame: { x: 20, y: 400, width: 362, height: 44 } },
+            { type: 'Button', frame: { x: 0, y: 60, width: 402, height: 560 } },
+          ],
+        },
+        'ios',
+      ),
+    };
+    const result = await driver.act({ kind: 'tap', ref: 'e1' });
+    expect(result.error).toContain('"Delete" is covered by the unnamed button');
+    expect(calls.some((call) => call[0] === 'tap')).toBe(false);
   });
 
   /** Matet's layout editor: a metric card drawn over most of the ADD METRIC button. */

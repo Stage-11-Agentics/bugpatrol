@@ -10,8 +10,10 @@ import type { ScreenSnapshot } from '@bugpatrol/invariants';
 export type UiElement = {
   ref: string;
   role: string;
-  /** Accessible name, label, or visible text -- the best human-readable handle. */
+  /** Accessible name, label, or visible text -- the best human-readable handle. Empty for a control with none. */
   name: string;
+  /** A control with no name: the nearest name on screen, to tell it apart. */
+  near?: string;
   text?: string;
   value?: string;
   testId?: string;

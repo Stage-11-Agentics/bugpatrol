@@ -189,6 +189,7 @@ function locator(element: UiElement): Locator {
     name: element.name,
     text: element.text,
     selector: element.selector,
+    ...(element.near ? { near: element.near } : {}),
     point: {
       x: element.box.x + element.box.width / 2,
       y: element.box.y + element.box.height / 2,
