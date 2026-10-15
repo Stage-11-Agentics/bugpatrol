@@ -259,6 +259,24 @@ describe('HandsetDriver', () => {
     expect(await driver.settle({ timeoutMs: 1000, intervalMs: 0 })).toEqual({ frames: 2, stable: true });
   });
 
+  it("settles while Hum's sleep timer counts down every second", async () => {
+    // A right-aligned countdown beside a fixed button: "10:00" then "9:59" is narrower, so x moves too.
+    const timer = (seconds: number): HandsetTree => {
+      const label = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+      const width = label.length * 11.5;
+      return {
+        ...tree,
+        elements: [
+          { type: 'StaticText', label: `Sleep in ${label}`, frame: { x: 360 - width, y: 140, width, height: 22 } },
+          { type: 'Button', label: 'Stop timer', frame: { x: 20, y: 200, width: 362, height: 50 } },
+        ],
+      };
+    };
+    const exec = sequence([600, 599, 598, 597].map(timer));
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    expect(await driver.settle({ timeoutMs: 1000, intervalMs: 0 })).toEqual({ frames: 2, stable: true });
+  });
+
   it('waits while an element moves, and settles once it stops', async () => {
     const exec = sequence([600, 500, 420, 418, 418].map((y, n) => live(n, y)));
     const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
