@@ -21,22 +21,22 @@ requests the npm bundle).
 
   | Event | Cache | lint | test | Run |
   |---|---|---|---|---|
-  | push | cold | 18 s | 30 s | 38797995591 |
-  | push | warm | 18 s | 24 s | 38798163037 |
-  | pull request | dependencies cold | 20 s | 47 s | 38800768876, attempt 1 |
-  | pull request | dependencies warm | 17 s | 39 s | 38800768876, attempt 2 |
+  | push to `main` | cold | 22 s | 29 s | 38801868319, attempt 1 |
+  | push to `main` | warm | 10 s | 18 s | 38801868319, attempt 2 |
+  | pull request | dependencies cold | 64 s | 55 s | 38801474179, attempt 1 |
+  | pull request | dependencies warm | 16 s | 36 s | 38801474179, attempt 2 |
 
-  The push rows predate the dependency cache. Both pull request rows restored a stale build
-  cache (10 s of TypeScript); a pull request restoring a fresh one from `main` spends 2 to 3 s.
-  A run that misses the dependency cache installs from the registry and spends 3 to 5 s more
-  saving it, so a push that misses runs over its budget once. It misses after a change to the
-  lockfile, `pnpm-workspace.yaml`, any `package.json` or `.npmrc`, and after 7 days without a
-  push to `main`; a pull request's own save is not visible to `main`.
+  The cold pull request lost 51 s to the registry, which is why node_modules is cached. Both
+  pull request rows restored a stale TypeScript cache from their own branch (10 s); one that
+  restores `main`'s spends 2 to 3 s. A run that misses the dependency cache installs from the
+  registry and spends 3 to 5 s saving it, so a push that misses can run over its budget once. It
+  misses after a change to the lockfile, `pnpm-workspace.yaml`, any `package.json` or `.npmrc`,
+  and after 7 days without a push to `main`; a pull request's own save is not visible to `main`.
 
 - **Where the speed comes from.** Nothing reaches a registry on a cache hit: node_modules and
   corepack's copy of pnpm are cached for the exact lockfile and package.json files. They restore
   in 2 s without the site (93 MB, the `test` job) and 5 s with it (220 MB, `lint`, whose knip
-  reads the site). From the registry, the install took 3 to 8 s, once 46 s, and
+  reads the site). From the registry, the install took 3 to 51 s, and
   `pnpm/action-setup`'s download of pnpm 1 to 20 s. No `actions/setup-node`: the jobs pin
   `ubuntu-24.04`, whose Node is 22, and setup-node's version checks took 1 to 7 s.
   TypeScript's incremental build (each `dist` and `tsconfig.tsbuildinfo`) is saved from `main`
