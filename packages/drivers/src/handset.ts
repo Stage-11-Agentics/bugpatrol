@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Locator, Platform } from '@bugpatrol/core';
 import type { ScreenSnapshot } from '@bugpatrol/invariants';
-import { locatorFor, stepFor } from './dom.js';
+import { elementTitle, locatorFor, stepFor } from './dom.js';
 import { nativeSnapshot, pruneSystemChrome } from './maestro.js';
 import { tapPoint } from './occlusion.js';
 import type { ActResult, Driver, DriverAction, Observation, UiElement } from './types.js';
@@ -103,11 +103,6 @@ export function handsetElements(tree: HandsetTree, platform: 'ios' | 'android'):
     const box = node.frame;
     if (!box || box.width <= 0 || box.height <= 0) continue;
     const name = (node.label || node.name || node.text || node.value || node.id || '').trim();
-    if (!name) continue;
-    // iOS reports a static text twice, once by identifier and once by value, on one frame.
-    const key = `${node.label ?? name}|${box.x},${box.y},${box.width},${box.height}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
     const type = node.type ?? '';
     const role = TEXTBOX.test(type)
       ? 'textbox'
@@ -120,6 +115,13 @@ export function handsetElements(tree: HandsetTree, platform: 'ios' | 'android'):
           : /Image/i.test(type)
             ? 'image'
             : 'group';
+    const interactive = role === 'button' || role === 'textbox' || role === 'switch';
+    // A control with no name is still a control: Hum's toggles are buttons with no label.
+    if (!name && !interactive) continue;
+    // iOS reports a static text twice, once by identifier and once by value, on one frame.
+    const key = `${node.label ?? name}|${box.x},${box.y},${box.width},${box.height}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     // An id equal to the visible label is the platform's fallback, not an identifier the app set.
     const testId = node.id && node.id !== (node.label || node.name) ? node.id : undefined;
     elements.push({
@@ -130,11 +132,41 @@ export function handsetElements(tree: HandsetTree, platform: 'ios' | 'android'):
       value: node.value || undefined,
       testId,
       box: { x: box.x, y: box.y, width: box.width, height: box.height },
-      interactive: role === 'button' || role === 'textbox' || role === 'switch',
+      interactive,
       enabled: true,
     });
   }
-  return pruneSystemChrome(elements, { width: tree.w, height: tree.h }, STATUS_BAR[platform]);
+  const kept = pruneSystemChrome(elements, { width: tree.w, height: tree.h }, STATUS_BAR[platform]);
+  return kept.map((element) => {
+    const near = element.name ? undefined : nearestName(element, kept);
+    return near ? { ...element, near } : element;
+  });
+}
+
+/** How far above or below an unnamed control a name may be, in tap units, when its own row has none. */
+const NEAR_ROW = 44;
+
+/**
+ * The name nearest an unnamed control, so the explorer can tell it apart from
+ * the others: the closest on its own row (a settings row puts its label at
+ * the far left and its toggle at the far right), otherwise the closest on the
+ * row just above or below. A container that holds the control is around it,
+ * not near it.
+ */
+function nearestName(target: UiElement, elements: UiElement[]): string | undefined {
+  const a = target.box;
+  let best: { name: string; score: number } | undefined;
+  for (const item of elements) {
+    if (!item.name || item.role === 'keyboard') continue;
+    const b = item.box;
+    const holds = b.x <= a.x && b.y <= a.y && b.x + b.width >= a.x + a.width && b.y + b.height >= a.y + a.height;
+    if (holds) continue;
+    const dx = Math.max(0, b.x - (a.x + a.width), a.x - (b.x + b.width));
+    const dy = Math.max(0, b.y - (a.y + a.height), a.y - (b.y + b.height));
+    const score = dy === 0 ? dx : dy <= NEAR_ROW ? 10_000 + dy * 2 + dx : Number.POSITIVE_INFINITY;
+    if (score < (best?.score ?? Number.POSITIVE_INFINITY)) best = { name: item.name, score };
+  }
+  return best?.name.slice(0, 40);
 }
 
 /**
@@ -308,7 +340,7 @@ export class HandsetDriver implements Driver {
       const at = tapPoint(element, this.lastObservation?.elements ?? [element]);
       if ('hidden' in at) {
         throw new HiddenTarget(
-          `Not tapped: ${JSON.stringify(element.name)} is covered by ${JSON.stringify(at.hidden.name)} and does not show. Scroll it into view or close what covers it, then look again.`,
+          `Not tapped: ${elementTitle(element)} is covered by ${elementTitle(at.hidden)} and does not show. Scroll it into view or close what covers it, then look again.`,
         );
       }
       await this.call('tap', ['--x', String(at.x), '--y', String(at.y)]);

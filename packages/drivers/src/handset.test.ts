@@ -121,6 +121,56 @@ describe('handsetElements', () => {
   });
 });
 
+/** Hum's eq tab: each section header has a pill toggle, a Button with no label, at the end of its row. */
+const hum: HandsetTree = {
+  ...tree,
+  elements: [
+    { ref: '@e1', type: 'Other', frame: { x: 0, y: 380, width: 402, height: 300 } },
+    { ref: '@e2', type: 'StaticText', label: 'NOTCH FILTER', frame: { x: 20, y: 412, width: 98, height: 14 } },
+    { ref: '@e3', type: 'Button', label: '', frame: { x: 336, y: 406, width: 46, height: 26 } },
+    { ref: '@e4', type: 'StaticText', label: 'frequency', frame: { x: 20, y: 446, width: 60, height: 13 } },
+    { ref: '@e5', type: 'StaticText', label: 'BINAURAL BEATS', frame: { x: 20, y: 560, width: 120, height: 14 } },
+    { ref: '@e6', type: 'Button', frame: { x: 336, y: 554, width: 46, height: 26 } },
+    { ref: '@e7', type: 'Image', frame: { x: 30, y: 640, width: 20, height: 20 } },
+    { ref: '@e8', type: 'Button', frame: { x: 180, y: 780, width: 40, height: 40 } },
+  ],
+};
+
+describe('handsetElements with unnamed controls', () => {
+  const elements = handsetElements(hum, 'ios');
+
+  it('keeps a control with no name, named by the text on its row', () => {
+    expect(elements.map((element) => [element.ref, element.role, element.name, element.near])).toEqual([
+      ['e1', 'text', 'NOTCH FILTER', undefined],
+      ['e2', 'button', '', 'NOTCH FILTER'],
+      ['e3', 'text', 'frequency', undefined],
+      ['e4', 'text', 'BINAURAL BEATS', undefined],
+      ['e5', 'button', '', 'BINAURAL BEATS'],
+      ['e6', 'button', '', undefined],
+    ]);
+    expect(elements[1]).toMatchObject({ interactive: true, box: { x: 336, y: 406, width: 46, height: 26 } });
+  });
+
+  it('drops a group or an image with no name, as before', () => {
+    expect(elements.some((element) => element.role === 'group' || element.role === 'image')).toBe(false);
+  });
+
+  it('takes the text on the row above or below when its own row has none', () => {
+    const below = handsetElements(
+      {
+        ...hum,
+        elements: [
+          { type: 'Button', frame: { x: 336, y: 406, width: 46, height: 26 } },
+          { type: 'StaticText', label: 'far below', frame: { x: 20, y: 500, width: 60, height: 13 } },
+          { type: 'StaticText', label: 'volume', frame: { x: 330, y: 440, width: 60, height: 13 } },
+        ],
+      },
+      'ios',
+    );
+    expect(below[0]!.near).toBe('volume');
+  });
+});
+
 describe('appErrors', () => {
   it('reports the app and its crashes, not framework chatter', () => {
     expect(appErrors(lines, 0)).toEqual([
@@ -198,6 +248,28 @@ describe('HandsetDriver', () => {
     expect(result.ok).toBe(true);
     expect(calls.at(-1)).toEqual(['tap', '--lease', 'ls_1', '--x', '201', '--y', '452', '--json']);
     expect(result.step).toMatchObject({ kind: 'tap', target: { testId: 'dial-button' } });
+  });
+
+  it('taps a control with no name by its ref, at its centre, and records the point for replay', async () => {
+    const { calls, exec } = fake({});
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    (driver as unknown as { lastObservation: unknown }).lastObservation = { elements: handsetElements(hum, 'ios') };
+    const result = await driver.act({ kind: 'tap', ref: 'e2' });
+    expect(result.ok).toBe(true);
+    expect(calls.at(-1)).toEqual(['tap', '--lease', 'ls_1', '--x', '359', '--y', '419', '--json']);
+    expect(result.step).toMatchObject({ kind: 'tap', target: { role: 'button', point: { x: 359, y: 419 } } });
+  });
+
+  it('names a covered control with no name by the text on its row', async () => {
+    const { exec } = fake({});
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    const covered = structuredClone(hum);
+    covered.elements.push({ type: 'Button', label: 'Done', frame: { x: 300, y: 380, width: 102, height: 80 } });
+    (driver as unknown as { lastObservation: unknown }).lastObservation = {
+      elements: handsetElements(covered, 'ios'),
+    };
+    const result = await driver.act({ kind: 'tap', ref: 'e2' });
+    expect(result.error).toContain('Not tapped: the unnamed button near "NOTCH FILTER" is covered by "Done"');
   });
 
   /** Matet's layout editor: a metric card drawn over most of the ADD METRIC button. */

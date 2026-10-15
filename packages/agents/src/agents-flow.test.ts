@@ -330,6 +330,63 @@ describe('explorer, replay, and judge', () => {
     }
   });
 
+  it('lists a control with no name by its role, place and nearest name, taps it by ref, and fingerprints it', async () => {
+    const plain = parseConfig({ version: 1, app: { connect: { url: 'fake://home' } } });
+    const f = await fixture({ config: plain });
+    try {
+      const toggle = (ref: string, y: number, near?: string) => ({
+        ...element(ref, ''),
+        box: { x: 336, y, width: 46, height: 26 },
+        ...(near ? { near } : {}),
+      });
+      f.screens.home!.elements = [toggle('e1', 406, 'NOTCH FILTER'), toggle('e2', 554, 'BINAURAL BEATS')];
+      const tools = explorerTools(f.session);
+      const looked = JSON.stringify(await run(tools, 'look'));
+      expect(looked).toContain('[e1] button (unnamed, near \\"NOTCH FILTER\\") (336,406 46x26)');
+      const tapped = await run(tools, 'tap', { ref: 'e2' });
+      expect(f.driver.actions.at(-1)).toEqual({ kind: 'tap', ref: 'e2' });
+      expect(tapped.meta?.summary).toBe('Tapped the unnamed button near "BINAURAL BEATS"');
+
+      const report = async (input: Record<string, unknown>) => {
+        const record = await f.workspace.startSession('explorer');
+        const later = new AgentSession(f.root, plain, new Vars(), record.id, 'explorer', f.driver);
+        const laterTools = explorerTools(later);
+        await run(laterTools, 'look');
+        await run(laterTools, 'record_screen', { id: 'eq', name: 'EQ', description: 'The eq tab' });
+        await run(laterTools, 'report_bug', { screen_id: 'eq', expected: 'On', severity: 'minor', ...input });
+        return (await f.workspace.readCandidates(record.id)).find((item) => item.source === 'explorer')!;
+      };
+      const first = await report({
+        title: 'Binaural toggle does nothing',
+        what_is_wrong: 'x',
+        kind: 'action',
+        element: 'e2',
+      });
+      // Another unnamed control appears above it: the toggle is still the one near BINAURAL BEATS.
+      f.screens.home!.elements = [
+        toggle('e1', 300, 'MASTER SWAY'),
+        toggle('e2', 406, 'NOTCH FILTER'),
+        toggle('e3', 554, 'BINAURAL BEATS'),
+      ];
+      const again = await report({
+        title: 'Binaural switch is dead',
+        what_is_wrong: 'y',
+        kind: 'action',
+        element: 'e3',
+      });
+      expect(again.fingerprint).toBe(first.fingerprint);
+      const notch = await report({
+        title: 'Binaural toggle does nothing',
+        what_is_wrong: 'x',
+        kind: 'action',
+        element: 'e2',
+      });
+      expect(notch.fingerprint).not.toBe(first.fingerprint);
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+
   it('lets the explorer report a different bug that matches a dismissed one by screen, kind and element', async () => {
     const f = await fixture({ config: parseConfig({ version: 1, app: { connect: { url: 'fake://home' } } }) });
     try {

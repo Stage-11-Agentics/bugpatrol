@@ -315,7 +315,11 @@ export function nativeSnapshot(observation: Observation, screenId: string): Scre
     url: observation.location,
     title: observation.title,
     elements: observation.elements.map((element) => {
-      const selector = element.testId ? `id=${element.testId}` : `text=${element.name}`;
+      const selector = element.testId
+        ? `id=${element.testId}`
+        : element.name
+          ? `text=${element.name}`
+          : `unnamed ${element.role}${element.near ? ` near ${element.near}` : ''}`;
       return {
         selector,
         box: element.box,
