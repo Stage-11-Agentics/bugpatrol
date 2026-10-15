@@ -203,6 +203,49 @@ describe('HandsetDriver', () => {
     expect(result.error).toContain('wait for the flow');
   });
 
+  /** A tree whose telemetry text ticks on every read, as Matet's HUD does while a wheel streams. */
+  const live = (n: number, dialY = 418): HandsetTree => ({
+    ...tree,
+    elements: [
+      {
+        ref: '@e1',
+        type: 'StaticText',
+        label: `${(23.4 + n / 10).toFixed(1)} km/h`,
+        // Centred text: its width and x follow the digits.
+        frame: { x: 150.33 - (n % 2) * 1.5, y: 317.33, width: 101.33 + (n % 2) * 3, height: 76 },
+      },
+      { ref: '@e2', type: 'Other', value: `${40 + n}%`, frame: { x: 20, y: 120, width: 362.5, height: 80 } },
+      { ref: '@e3', type: 'Button', label: 'Dial', frame: { x: 91, y: dialY, width: 220, height: 68 } },
+    ],
+  });
+
+  function sequence(trees: HandsetTree[]) {
+    let reads = 0;
+    const exec: HandsetExec = async (args) => envelope(args[0]!, trees[Math.min(reads++, trees.length - 1)]);
+    return exec;
+  }
+
+  it('settles when the layout holds, even while text and values tick', async () => {
+    const exec = sequence([0, 1, 2, 3, 4, 5].map((n) => live(n)));
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    expect(await driver.settle({ timeoutMs: 1000, intervalMs: 0 })).toEqual({ frames: 2, stable: true });
+  });
+
+  it('waits while an element moves, and settles once it stops', async () => {
+    const exec = sequence([600, 500, 420, 418, 418].map((y, n) => live(n, y)));
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    expect(await driver.settle({ timeoutMs: 1000, intervalMs: 0 })).toEqual({ frames: 5, stable: true });
+  });
+
+  it('gives up at the timeout when the layout never holds', async () => {
+    let n = 0;
+    const exec: HandsetExec = async (args) => envelope(args[0]!, live(n, 400 + n++ * 10));
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    const settled = await driver.settle({ timeoutMs: 50, intervalMs: 0 });
+    expect(settled.stable).toBe(false);
+    expect(settled.frames).toBeGreaterThan(1);
+  });
+
   it('says plainly what Handset cannot do yet', async () => {
     const driver = new HandsetDriver('android', { lease: 'ls_1' }, fake({}).exec);
     expect(await driver.act({ kind: 'back' })).toEqual({

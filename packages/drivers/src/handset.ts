@@ -160,6 +160,26 @@ export function appErrors(lines: HandsetLogLine[], after: number): string[] {
   return out.slice(-20);
 }
 
+const TEXT = /StaticText|TextView/i;
+
+/**
+ * The layout of a tree: each element's type and frame, rounded to whole tap
+ * units. Labels and values are left out, so live data (a speed, a clock, a
+ * percentage) that ticks on every read does not hold up settling. A text
+ * element's width, and its x when centred, follow its text, so only its row
+ * counts: y and height.
+ */
+export function layoutSignature(tree: HandsetTree): string {
+  const rows = tree.elements.flatMap((element) => {
+    const box = element.frame;
+    if (!box) return [];
+    const [x, y, width, height] = [box.x, box.y, box.width, box.height].map(Math.round);
+    const type = element.type ?? '';
+    return [TEXT.test(type) ? [type, y, height] : [type, x, y, width, height]];
+  });
+  return sha256(JSON.stringify(rows));
+}
+
 /** Bugpatrol scrolls the content; a swipe moves the finger the other way. */
 export function swipeDirection(direction: 'up' | 'down' | 'left' | 'right'): string {
   return { up: 'down', down: 'up', left: 'right', right: 'left' }[direction];
@@ -354,7 +374,11 @@ export class HandsetDriver implements Driver {
     }
   }
 
-  /** Settled means the element tree stopped changing; a tree read is under a second when warm. */
+  /**
+   * Settled means the layout stopped changing: two tree reads in a row with the
+   * same `layoutSignature`. A tree read is under a second when warm; the
+   * timeout is the backstop for a screen that keeps moving.
+   */
   async settle(
     options: { timeoutMs?: number; intervalMs?: number } = {},
   ): Promise<{ frames: number; stable: boolean }> {
@@ -365,7 +389,7 @@ export class HandsetDriver implements Driver {
     let frames = 0;
     while (Date.now() - start < timeout) {
       const tree = await this.call<HandsetTree>('tree');
-      const current = sha256(JSON.stringify(tree.elements.map((element) => [element.label, element.frame])));
+      const current = layoutSignature(tree);
       frames++;
       if (current === previous) return { frames, stable: true };
       previous = current;
