@@ -7,6 +7,7 @@ import type { ScreenSnapshot } from '@bugpatrol/invariants';
 import { elementTitle, locatorFor, stepFor } from './dom.js';
 import { nativeSnapshot, pruneSystemChrome } from './maestro.js';
 import { inside, tapPoint } from './occlusion.js';
+import { scrollStart } from './scroll-start.js';
 import type { ActResult, Driver, DriverAction, Observation, UiElement } from './types.js';
 
 /**
@@ -92,6 +93,11 @@ const defaultExec =
     });
 
 const STATUS_BAR = { ios: 54, android: 24 } as const;
+/** Containers a swipe scrolls, and controls that follow a drag, which a scroll must not start on. */
+const SCROLLER = /ScrollView|Table|CollectionView|WebView|RecyclerView|ListView|GridView|ViewPager/i;
+const DRAGGABLE = /Slider|Switch|Toggle|Picker|Adjustable|SeekBar|RatingBar|SegmentedControl|MapView|^Map$/i;
+/** How far round a point this session tapped or dragged a scroll stays away, on a 402-point phone. */
+const TOUCHED = 24;
 const TEXTBOX = /TextField|SecureTextField|SearchField|TextView|EditText/i;
 const BUTTON = /Button|Cell|Link|Tab|MenuItem|Switch|Toggle|CheckBox|Slider|Picker|ImageButton/i;
 /** Android's label class and its subclasses. iOS's TextView, and Android's EditText and AutoCompleteTextView, take text. */
@@ -291,6 +297,10 @@ export function swipeDirection(direction: 'up' | 'down' | 'left' | 'right'): str
 export class HandsetDriver implements Driver {
   readonly drags = true;
   private lastObservation?: Observation;
+  /** The newest tree read, by an observation or a settle: what a scroll's start is chosen against. */
+  private lastTree?: HandsetTree;
+  /** Where this session tapped a bare point or began a drag: a drawn control no tree lists, on that layout. */
+  private touched: Array<{ box: UiElement['box']; tree?: HandsetTree }> = [];
   /** Milliseconds since the epoch of the newest log line already reported. */
   private lastLogAt = 0;
   private readonly exec: HandsetExec;
@@ -325,7 +335,7 @@ export class HandsetDriver implements Driver {
 
   async connect(): Promise<void> {
     // The first tree warms the hub's drive bridge, so the first observation is not the slow one.
-    await this.call<HandsetTree>('tree');
+    this.lastTree = await this.call<HandsetTree>('tree');
     this.lastLogAt = Date.now();
   }
 
@@ -372,6 +382,7 @@ export class HandsetDriver implements Driver {
         at: new Date().toISOString(),
       };
       this.lastObservation = observation;
+      this.lastTree = tree;
       return observation;
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -417,7 +428,59 @@ export class HandsetDriver implements Driver {
     if (!locator.point) throw new Error('No element matches the locator');
     this.onScreen(locator.point, 'tapped');
     await this.call('tap', ['--x', String(locator.point.x), '--y', String(locator.point.y)]);
+    // A bare point, with no label to try, is a control the tree does not list.
+    if (!locator.testId && !locator.name && !locator.text) this.touch(locator.point);
     return { degraded: true };
+  }
+
+  /**
+   * Remember where a bare tap or a drag began, so a later scroll does not
+   * start on that control. It holds while the layout does: a scroll or a new
+   * screen moves the control, and the place is forgotten.
+   */
+  private touch(at: { x: number; y: number }): void {
+    const pad = TOUCHED * ((this.lastObservation?.viewport.width ?? 402) / 402);
+    const box = { x: at.x - pad, y: at.y - pad, width: 2 * pad, height: 2 * pad };
+    this.touched = [...this.touched, { box, tree: this.lastTree }].slice(-16);
+  }
+
+  /**
+   * Where a scroll starts and how far it goes, inside the scroll container
+   * under `at` (an element of the area to scroll) or under the screen's
+   * centre, away from controls that follow a drag. Undefined when no tree
+   * has been read.
+   */
+  private scrollFrom(direction: 'up' | 'down' | 'left' | 'right', at?: { x: number; y: number }) {
+    const tree = this.lastTree;
+    if (!tree) return undefined;
+    const screen = { width: tree.w, height: tree.h };
+    const vertical = direction === 'up' || direction === 'down';
+    const unit = tree.w / 402;
+    const point = at ?? { x: tree.w / 2, y: tree.h / 2 };
+    const holds = (box: UiElement['box']) =>
+      point.x >= box.x && point.x <= box.x + box.width && point.y >= box.y && point.y <= box.y + box.height;
+    // The innermost container that holds the point and is long enough to scroll this way.
+    const region = tree.elements
+      .flatMap((node) => (node.frame && SCROLLER.test(node.type ?? '') ? [node.frame] : []))
+      .filter((box) => holds(box) && (vertical ? box.height >= 0.3 * tree.h : box.width >= 0.3 * tree.w))
+      .sort((p, q) => p.width * p.height - q.width * q.height)[0];
+    const draggable = tree.elements.flatMap((node) =>
+      node.frame && DRAGGABLE.test(node.type ?? '') ? [node.frame] : [],
+    );
+    const touched = this.touched
+      .filter((place) => place.tree && sameLayout(place.tree, tree))
+      .map((place) => place.box);
+    return scrollStart({
+      screen,
+      region,
+      direction,
+      // Handset's own defaults: 400 points on iOS, 30% of the screen on Android.
+      travel: this.platform === 'ios' ? 400 * unit : 0.3 * (vertical ? tree.h : tree.w),
+      elements: handsetElements(tree, this.platform),
+      avoid: [...draggable, ...touched],
+      // iOS's status bar, scaled: on Android about 145 px, a little more than its own bar.
+      top: STATUS_BAR.ios * unit,
+    });
   }
 
   /** An explicit point is in tap units and on the screen the last observation saw. */
@@ -434,6 +497,7 @@ export class HandsetDriver implements Driver {
       let element: UiElement | undefined;
       let degraded = false;
       let point: { x: number; y: number } | undefined;
+      let note: string | undefined;
       switch (action.kind) {
         case 'tap': {
           element = this.element(action);
@@ -449,10 +513,23 @@ export class HandsetDriver implements Driver {
         }
         case 'scroll': {
           element = this.element(action);
-          const args = ['--direction', swipeDirection(action.direction)];
-          if (element) {
-            const { x, y } = locatorFor(element).point!;
-            args.push('--x', String(x), '--y', String(y));
+          const finger = swipeDirection(action.direction) as 'up' | 'down' | 'left' | 'right';
+          const at = element ? locatorFor(element).point : action.locator?.point;
+          const start = this.scrollFrom(finger, at);
+          const args = ['--direction', finger];
+          if (start && 'none' in start) {
+            throw new Refused(
+              `Not scrolled: ${start.none}. To scroll ${action.direction}, drag ${finger} from a point on empty background.`,
+            );
+          }
+          if (start) {
+            args.push('--x', String(start.x), '--y', String(start.y), '--distance', String(start.distance));
+            if (start.on) {
+              note = `The scroll started on ${elementTitle(start.on)}: the area to scroll has no empty space or text.`;
+            }
+          } else if (at) {
+            // No tree read yet: start on the element, as before.
+            args.push('--x', String(at.x), '--y', String(at.y));
           }
           await this.call('swipe', args);
           break;
@@ -485,6 +562,7 @@ export class HandsetDriver implements Driver {
             '--distance',
             String(distance),
           ]);
+          this.touch(from);
           break;
         }
         case 'back': {
@@ -523,7 +601,7 @@ export class HandsetDriver implements Driver {
       const step = stepFor(action, element, fallback);
       // A replay that falls back to the point must tap where this tap landed.
       if (point && (step.kind === 'tap' || step.kind === 'type') && step.target) step.target.point = point;
-      return { ok: true, ...(degraded ? { degraded } : {}), step };
+      return { ok: true, ...(degraded ? { degraded } : {}), ...(note ? { note } : {}), step };
     } catch (error) {
       if (error instanceof Refused) return { ok: false, retryable: false, error: error.message };
       if (error instanceof HandsetError) {
@@ -549,6 +627,7 @@ export class HandsetDriver implements Driver {
     let frames = 0;
     while (Date.now() - start < timeout) {
       const tree = await this.call<HandsetTree>('tree');
+      this.lastTree = tree;
       frames++;
       if (previous && sameLayout(previous, tree)) return { frames, stable: true };
       previous = tree;
