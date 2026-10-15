@@ -23,22 +23,24 @@ requests the npm bundle).
   |---|---|---|---|---|
   | push | cold | 18 s | 30 s | 38797995591 |
   | push | warm | 18 s | 24 s | 38798163037 |
-  | pull request | cold | 23 s | 45 s | 38799920010, attempt 1 |
-  | pull request | warm | 17 to 20 s | 35 to 50 s | 38798169345; 38799920010, attempt 2 |
+  | pull request | dependencies cold | 20 s | 47 s | 38800768876, attempt 1 |
+  | pull request | dependencies warm | 17 s | 39 s | 38800768876, attempt 2 |
 
-  The runners are noisy: the 50 s run lost 8 s to `pnpm/action-setup` and 13 s to a stale
-  build cache. A cold push sits on its budget; `main` renews both caches, so it is cold only
-  after a lockfile change or 7 days without a push.
+  The push rows predate the dependency cache. Both pull request rows restored a stale build
+  cache (10 s of TypeScript); a pull request restoring a fresh one from `main` spends 2 to 3 s.
+  A run that misses the dependency cache spends 3 to 5 s more saving it. `main` renews both
+  caches, so a push misses only after a lockfile change or 7 days without a push.
 
-- **Where the speed comes from.** node_modules is cached for the exact lockfile and package.json
-  files, and a hit skips the install: 2 s to restore without the site (89 MB, the `test` job),
-  6 s with it (216 MB, `lint`, which needs it for knip). The registry install took 3 to 8 s, and
-  once 46 s. No `actions/setup-node`: the jobs pin `ubuntu-24.04`, whose Node is 22, and
-  setup-node's version checks took 1 to 7 s. TypeScript's incremental build (each `dist` and
-  `tsconfig.tsbuildinfo`) is saved from `main` and restored by everything else: 2 to 3 s warm,
-  10 to 11 s cold. Vitest runs with `--no-isolate`, which cut the files outside
-  `review.test.ts` from 20 s to 8.5 s. If a test fails only in Fast and passes alone, suspect
-  state shared between test files.
+- **Where the speed comes from.** Nothing reaches a registry on a cache hit: node_modules and
+  corepack's copy of pnpm are cached for the exact lockfile and package.json files. They restore
+  in 2 s without the site (93 MB, the `test` job) and 5 s with it (220 MB, `lint`, whose knip
+  reads the site). From the registry, the install took 3 to 8 s, once 46 s, and
+  `pnpm/action-setup`'s download of pnpm 1 to 20 s. No `actions/setup-node`: the jobs pin
+  `ubuntu-24.04`, whose Node is 22, and setup-node's version checks took 1 to 7 s.
+  TypeScript's incremental build (each `dist` and `tsconfig.tsbuildinfo`) is saved from `main`
+  and restored by everything else: 2 to 3 s warm, 10 to 11 s cold. Vitest runs with
+  `--no-isolate`, which cut the files outside `review.test.ts` from 20 s to 8.5 s. If a test
+  fails only in Fast and passes alone, suspect state shared between test files.
 - **Quarantine.** `.github/fast/quarantine.txt` lists everything Fast leaves out, with the
   reason: five files and six tests that need Playwright's Chromium or ffmpeg, one dashboard test
   that waits a fixed 700 ms for a file watcher, and three files over 3 s that run on pull
