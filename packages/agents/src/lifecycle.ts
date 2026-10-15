@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { type AppCommand, type AppConfig, InfrastructureError, paths } from '@bugpatrol/core';
 import type { Vars } from './vars.js';
 
@@ -14,8 +14,18 @@ export async function startApp(app: AppConfig, opts: Options): Promise<{ vars: V
   const effectiveSource = opts.source ?? configuredSource;
   // A fixer's worktree is left alone: the line would land in its diff.
   if (app.connect.handset && !opts.source) {
-    const added = ignoreForHandset(opts.root, configuredSource);
-    if (added) report(`Added ${added} to .handsetignore: Bugpatrol's files are not app source.`);
+    // Handset's project is the folder `handset run` runs in, so the file goes there.
+    const runsHandset = app.setup.filter((command) => /\bhandset\b/.test(command.run));
+    const folders = new Set(
+      runsHandset.length
+        ? runsHandset.map((command) => resolve(opts.root, opts.vars.resolveConfig(command.cwd ?? '.')))
+        : [configuredSource],
+    );
+    for (const folder of folders) {
+      const added = ignoreForHandset(opts.root, folder);
+      if (added)
+        report(`Added ${added} to ${join(folder, '.handsetignore')}: Bugpatrol's files are not app source. Commit it.`);
+    }
   }
 
   async function run(command: AppCommand, phase: 'Setup' | 'Teardown'): Promise<void> {
@@ -169,12 +179,12 @@ function killGroup(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): voi
  * app map and the routines, which are committed. Handset fingerprints the
  * app's source, tracked files included, to decide whether to rebuild, so
  * each session forced a rebuild. Handset's own `.handsetignore`, at the root
- * of the source, says what is not source. Adds the folder to it once, when
- * the folder is inside the source, and returns the line it added.
+ * of its project, says what is not source. Adds the folder to it once, when
+ * the folder is inside that project, and returns the line it added.
  */
 function ignoreForHandset(root: string, source: string): string | undefined {
   const folder = relative(source, paths.dir(root));
-  if (!folder || folder.startsWith('..') || isAbsolute(folder)) return undefined;
+  if (!folder || folder === '..' || folder.startsWith(`..${sep}`) || isAbsolute(folder)) return undefined;
   const line = `${folder.split('\\').join('/')}/`;
   const file = join(source, '.handsetignore');
   try {
