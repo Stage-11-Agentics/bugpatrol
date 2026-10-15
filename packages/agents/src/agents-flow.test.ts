@@ -301,7 +301,7 @@ describe('explorer, replay, and judge', () => {
       expect(ticked.fingerprint).toBe(range.fingerprint);
       // Another element, or another kind of bug on the same element, is another bug.
       expect(range.fingerprint).not.toBe(first.fingerprint);
-      // Two elements whose names differ only by a number are apart where they are.
+      // Two elements whose names differ only by a number are apart by their order.
       f.screens.home!.elements.push({ ...element('e3', 'Tab 1'), box: { x: 0, y: 800, width: 100, height: 40 } });
       f.screens.home!.elements.push({ ...element('e4', 'Tab 2'), box: { x: 100, y: 800, width: 100, height: 40 } });
       const tab1 = await later('Range 12 km', { title: 'Tab', what_is_wrong: 'x', kind: 'action', element: 'e3' });

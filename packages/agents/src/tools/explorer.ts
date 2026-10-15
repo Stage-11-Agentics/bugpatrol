@@ -146,7 +146,9 @@ type BugKind = (typeof BUG_KINDS)[number];
  * next: the screen (or, on no recorded screen, the location), the kind of
  * bug, and what it is about. That is the element's test id, or its role, the
  * words of its name (numbers and punctuation left out, since live values
- * tick) and where it is, so "Tab 1" and "Tab 2" stay apart; without an
+ * tick) and, when several share those, its place among them, so "Tab 1" and
+ * "Tab 2" stay apart. Its frame is left out: it moves with live text,
+ * scrolling and the keyboard. Without an
  * element, the replay check; without either, the title. An `other` also
  * keeps its title, so two different bugs never share one for lack of a kind.
  */
@@ -155,6 +157,7 @@ function bugFingerprint(input: {
   location: string;
   kind: BugKind;
   element?: UiElement;
+  elements: UiElement[];
   bug: BugCheck;
   title: string;
 }): string {
@@ -165,17 +168,18 @@ function bugFingerprint(input: {
       .trim();
   const exact = (value = '') => value.toLowerCase().replace(/\s+/g, ' ').trim();
   const { element, bug } = input;
+  const named = (item: UiElement) => `${item.role}:${words(item.name)}`;
+  const twins = element ? input.elements.filter((item) => !item.testId && named(item) === named(element)) : [];
   const subject = element
     ? element.testId
       ? `id:${element.testId}`
-      : `element:${element.role}:${words(element.name)}`
+      : `element:${named(element)}${twins.length > 1 ? `#${twins.indexOf(element)}` : ''}`
     : Object.keys(bug).length
       ? `check:${exact(bug.shows)}|${exact(bug.lacks)}|${exact(bug.error)}`
       : `title:${exact(input.title)}`;
   return fingerprint({
     screenId: input.screenId ?? `unrecorded:${input.location}`,
     ruleId: `explorer:${input.kind}`,
-    ...(element && !element.testId ? { regions: [element.box] } : {}),
     domNodeSignature: input.kind === 'other' && element ? `${subject}|title:${exact(input.title)}` : subject,
   });
 }
@@ -822,7 +826,15 @@ export function explorerTools(
           sessionId: session.sessionId,
           screenId,
           source: 'explorer',
-          fingerprint: bugFingerprint({ screenId, location: screenKey(observation), kind, element, bug, title }),
+          fingerprint: bugFingerprint({
+            screenId,
+            location: screenKey(observation),
+            kind,
+            element,
+            elements: observation.elements,
+            bug,
+            title,
+          }),
           summary: session.vars.redact(title) as string,
           detail: session.vars.redact(`${arg(input, 'what_is_wrong')}\nExpected: ${arg(input, 'expected')}`) as string,
           severity: input.severity as Candidate['severity'],
