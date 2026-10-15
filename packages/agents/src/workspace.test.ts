@@ -1,4 +1,5 @@
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type Issue, paths } from '@bugpatrol/core';
@@ -7,6 +8,26 @@ import { Vars } from './vars.js';
 import { Workspace } from './workspace.js';
 
 describe('Workspace', () => {
+  it("keeps a session's screenshots out of the app's source, even with no ignore line in the repo", async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bugpatrol-work-'));
+    try {
+      execFileSync('git', ['init', '-q', root]);
+      await writeFile(join(root, 'App.swift'), 'struct App {}\n');
+      const workspace = new Workspace(root);
+      const session = await workspace.startSession('explorer');
+      await workspace.saveScreenshot(session.id, Buffer.from('png'), 'home');
+      await workspace.upsertLessons([{ role: 'explorer', source: 'agent', text: 'The HUD streams live numbers.' }]);
+      // A build cache that fingerprints the source lists files the way git does.
+      const source = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+        cwd: root,
+        encoding: 'utf8',
+      });
+      expect(source.trim().split('\n')).toEqual(['App.swift']);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('merges screens and persists sessions with relative screenshots and append-only events', async () => {
     const root = await mkdtemp(join(tmpdir(), 'bugpatrol-work-'));
     const workspace = new Workspace(root);

@@ -11,6 +11,7 @@ import {
   type Candidate,
   type FixProposal,
   type Issue,
+  ignoreDataDir,
   type Lesson,
   type LessonRole,
   type LogRecord,
@@ -306,6 +307,7 @@ export class Workspace {
       candidates: 0,
       issues: [],
     };
+    ignoreDataDir(this.root);
     await atomic(join(paths.session(this.root, id), 'session.json'), session);
     return session;
   }
