@@ -1,0 +1,158 @@
+# Fast: Stage 11's push and pull request tier for this fork.
+#
+# Speed is the point of this workflow. Each job holds a budget on GitHub's
+# job clock (from a runner starting the job to its completion; queue time is
+# not counted):
+#
+#   push to main    30 s
+#   pull request    60 s
+#
+# Over budget is a defect, not a cost. Move the slowest test out
+# (.github/fast/quarantine.txt), cut the step, or make it faster. Never raise
+# a budget or a timeout to make a run fit. The last step of each job reports
+# its clock and warns when it is over.
+#
+# It runs what a clean runner can run in seconds: Biome, knip, the TypeScript
+# build and the hermetic tests. .github/fast/quarantine.txt lists, with the
+# reason, what it leaves out: tests that need Playwright's Chromium or ffmpeg,
+# flaky ones, and the files over 3 s, which run on pull requests only. The
+# upstream workflows (ci.yml and the rest) are disabled on this fork with
+# `gh workflow disable`; see CLAUDE.md.
+name: Fast
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read # the clock step reads the job's start time
+
+# A new push to a pull request cancels its older run; every push to main runs.
+concurrency:
+  group: fast-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
+
+env:
+  FAST_BUDGET: ${{ github.event_name == 'pull_request' && 60 || 30 }}
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 2 || 1 }}
+    env:
+      # knip reads every workspace, the site too, so this job installs it all.
+      DEPS: |
+        ~/.cache/node/corepack
+        node_modules
+        packages/*/node_modules
+        examples/*/node_modules
+        site/node_modules
+    steps:
+      - uses: actions/checkout@v7
+      # node_modules itself and corepack's copy of pnpm, for the exact
+      # lockfile and package.json files. A hit reaches no registry: installs
+      # took 3-8 s and once 46 s, and pnpm/action-setup's download of pnpm
+      # 1-20 s.
+      - id: deps
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.DEPS }}
+          key: deps-all-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '**/package.json', '.npmrc') }}
+      # pnpm at package.json's packageManager version. Node is the image's
+      # own: 22 on ubuntu-24.04, pinned because ubuntu-latest moves to Ubuntu
+      # 26. actions/setup-node spent 1-7 s on version checks.
+      - name: pnpm
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          corepack enable --install-directory "$HOME/.local/bin" pnpm
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - id: install
+        name: Install
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: pnpm install --frozen-lockfile
+      # Saved at once, so it holds what the install wrote and nothing later.
+      - if: steps.install.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.DEPS }}
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+      - run: pnpm check --error-on-warnings
+      - run: pnpm knip
+      - name: Job clock
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/fast/clock.sh
+
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 2 || 1 }}
+    env:
+      # The build and the tests need no site, so it is not installed.
+      DEPS: |
+        ~/.cache/node/corepack
+        node_modules
+        packages/*/node_modules
+        examples/*/node_modules
+    steps:
+      - uses: actions/checkout@v7
+      - id: deps
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.DEPS }}
+          key: deps-nosite-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '**/package.json', '.npmrc') }}
+      - name: pnpm
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          corepack enable --install-directory "$HOME/.local/bin" pnpm
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # TypeScript's incremental build: each package's dist and its
+      # tsconfig.tsbuildinfo, which records every file by a hash of its
+      # content, so a stale cache costs time, not a wrong typecheck.
+      - id: tsc-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            packages/*/dist
+            packages/*/tsconfig.tsbuildinfo
+          key: tsc-${{ runner.os }}-${{ github.sha }}
+          restore-keys: tsc-${{ runner.os }}-
+      - id: install
+        name: Install
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: pnpm install --frozen-lockfile --filter '!@bugpatrol/site'
+      # Saved at once, so it holds what the install wrote and nothing later.
+      - if: steps.install.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.DEPS }}
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+      - id: build
+        name: Typecheck and build
+        run: pnpm exec tsc --build
+      # The npm package is an esbuild bundle of the workspace; about 1 s.
+      - name: Bundle (pull requests)
+        if: github.event_name == 'pull_request'
+        run: |
+          pnpm --filter bugpatrol build
+          node packages/bugpatrol/dist/bin.js --version
+      - name: Hermetic tests
+        timeout-minutes: 1
+        run: bash .github/fast/test.sh
+      # Saved from main only, as the build changes with every commit: a pull
+      # request restores main's newest.
+      - if: always() && github.event_name == 'push' && steps.build.outcome == 'success' && steps.tsc-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            packages/*/dist
+            packages/*/tsconfig.tsbuildinfo
+          key: tsc-${{ runner.os }}-${{ github.sha }}
+      - name: Job clock
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/fast/clock.sh
