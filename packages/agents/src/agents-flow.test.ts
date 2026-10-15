@@ -252,6 +252,116 @@ describe('explorer, replay, and judge', () => {
     }
   });
 
+  it('gives the same bug the same fingerprint in a later session, however it is worded', async () => {
+    const plain = parseConfig({ version: 1, app: { connect: { url: 'fake://home' } } });
+    const f = await fixture({ config: plain });
+    try {
+      f.screens.home!.elements = [
+        { ...element('e1', 'MAX SPD --'), role: 'text', interactive: false },
+        { ...element('e2', 'Range 12 km'), role: 'text', interactive: false },
+      ];
+      const report = async (session: AgentSession, input: Record<string, unknown>) => {
+        const tools = explorerTools(session);
+        await run(tools, 'look');
+        await run(tools, 'record_screen', { id: 'hud', name: 'HUD', description: 'The live ride' });
+        await run(tools, 'report_bug', { screen_id: 'hud', expected: 'A value', severity: 'major', ...input });
+        return (await f.workspace.readCandidates(session.sessionId)).find((item) => item.source === 'explorer')!;
+      };
+      const first = await report(f.session, {
+        title: 'MAX SPD card never fills while riding',
+        what_is_wrong: 'The card shows -- the whole ride.',
+        kind: 'data',
+        element: 'e1',
+      });
+      const later = async (name: string, input: Record<string, unknown>) => {
+        f.screens.home!.elements[1]!.name = name;
+        const record = await f.workspace.startSession('explorer');
+        return report(new AgentSession(f.root, plain, new Vars(), record.id, 'explorer', f.driver), input);
+      };
+      const again = await later('Range 12 km', {
+        title: 'HUD max speed stays empty',
+        what_is_wrong: 'Max speed is blank during a ride.',
+        kind: 'data',
+        element: 'e1',
+      });
+      expect(again.fingerprint).toBe(first.fingerprint);
+      // A ticking number in the element's name is the same element.
+      const range = await later('Range 12 km', {
+        title: 'Range is wrong',
+        what_is_wrong: 'x',
+        kind: 'data',
+        element: 'e2',
+      });
+      const ticked = await later('Range 13 km', {
+        title: 'Bad range',
+        what_is_wrong: 'y',
+        kind: 'data',
+        element: 'e2',
+      });
+      expect(ticked.fingerprint).toBe(range.fingerprint);
+      // Another element, or another kind of bug on the same element, is another bug.
+      expect(range.fingerprint).not.toBe(first.fingerprint);
+      // Two elements whose names differ only by a number are apart by their order.
+      f.screens.home!.elements.push({ ...element('e3', 'Tab 1'), box: { x: 0, y: 800, width: 100, height: 40 } });
+      f.screens.home!.elements.push({ ...element('e4', 'Tab 2'), box: { x: 100, y: 800, width: 100, height: 40 } });
+      const tab1 = await later('Range 12 km', { title: 'Tab', what_is_wrong: 'x', kind: 'action', element: 'e3' });
+      const tab2 = await later('Range 12 km', { title: 'Tab', what_is_wrong: 'x', kind: 'action', element: 'e4' });
+      expect(tab1.fingerprint).not.toBe(tab2.fingerprint);
+      // A test id is the element, whatever its name says.
+      f.screens.home!.elements[0]!.testId = 'max-speed';
+      const byId = await later('Range 12 km', { title: 'Max', what_is_wrong: 'x', kind: 'data', element: 'e1' });
+      f.screens.home!.elements[0]!.name = 'Top speed --';
+      expect(
+        (await later('Range 12 km', { title: 'Top', what_is_wrong: 'y', kind: 'data', element: 'e1' })).fingerprint,
+      ).toBe(byId.fingerprint);
+      // An "other" keeps its title, so two of them on one element stay apart.
+      const odd = await later('Range 12 km', { title: 'Odd one', what_is_wrong: 'x', kind: 'other', element: 'e2' });
+      const odder = await later('Range 12 km', { title: 'Odd two', what_is_wrong: 'x', kind: 'other', element: 'e2' });
+      expect(odd.fingerprint).not.toBe(odder.fingerprint);
+      const clipped = await later('Range 12 km', {
+        title: 'MAX SPD is cut off',
+        what_is_wrong: 'z',
+        kind: 'display',
+        element: 'e1',
+      });
+      expect(clipped.fingerprint).not.toBe(first.fingerprint);
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+
+  it('lets the explorer report a different bug that matches a dismissed one by screen, kind and element', async () => {
+    const f = await fixture({ config: parseConfig({ version: 1, app: { connect: { url: 'fake://home' } } }) });
+    try {
+      const tools = explorerTools(f.session);
+      await run(tools, 'record_screen', { id: 'home', name: 'Home', description: 'Home' });
+      const bug = { screen_id: 'home', expected: 'x', severity: 'minor', kind: 'action', element: 'e1' };
+      await run(tools, 'report_bug', { ...bug, title: 'Settings flickers', what_is_wrong: 'It flickers' });
+      const first = (await pendingCandidates(f.session, [f.session.sessionId]))[0]!;
+      await run(judgeTools(f.session, [f.session.sessionId], 'fake-judge'), 'dismiss', {
+        candidate_ids: [first.id],
+        reason: 'By design',
+      });
+      const matched = await run(tools, 'report_bug', {
+        ...bug,
+        title: 'Settings opens Help',
+        what_is_wrong: 'Wrong page',
+      });
+      expect(matched.content[0]).toMatchObject({ text: expect.stringContaining('report it again with kind "other"') });
+      await run(tools, 'report_bug', {
+        ...bug,
+        kind: 'other',
+        title: 'Settings opens Help',
+        what_is_wrong: 'Wrong page',
+      });
+      expect((await pendingCandidates(f.session, [f.session.sessionId])).map((item) => item.summary)).toEqual([
+        'Settings opens Help',
+      ]);
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+
   it("saves a new issue's repro as a committed routine", async () => {
     const f = await fixture();
     try {

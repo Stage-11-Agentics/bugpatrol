@@ -138,6 +138,52 @@ function locationKey(observation: Observation): string {
     : `${screenKey(observation)}|${names}`;
 }
 
+const BUG_KINDS = ['action', 'display', 'data', 'error', 'loading', 'navigation', 'consistency', 'other'] as const;
+type BugKind = (typeof BUG_KINDS)[number];
+
+/**
+ * A reported bug's fingerprint, from facts that hold from one session to the
+ * next: the screen (or, on no recorded screen, the location), the kind of
+ * bug, and what it is about. That is the element's test id, or its role, the
+ * words of its name (numbers and punctuation left out, since live values
+ * tick) and, when several share those, its place among them, so "Tab 1" and
+ * "Tab 2" stay apart. Its frame is left out: it moves with live text,
+ * scrolling and the keyboard. Without an
+ * element, the replay check; without either, the title. An `other` also
+ * keeps its title, so two different bugs never share one for lack of a kind.
+ */
+function bugFingerprint(input: {
+  screenId?: string;
+  location: string;
+  kind: BugKind;
+  element?: UiElement;
+  elements: UiElement[];
+  bug: BugCheck;
+  title: string;
+}): string {
+  const words = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/[^\p{L}]+/gu, ' ')
+      .trim();
+  const exact = (value = '') => value.toLowerCase().replace(/\s+/g, ' ').trim();
+  const { element, bug } = input;
+  const named = (item: UiElement) => `${item.role}:${words(item.name)}`;
+  const twins = element ? input.elements.filter((item) => !item.testId && named(item) === named(element)) : [];
+  const subject = element
+    ? element.testId
+      ? `id:${element.testId}`
+      : `element:${named(element)}${twins.length > 1 ? `#${twins.indexOf(element)}` : ''}`
+    : Object.keys(bug).length
+      ? `check:${exact(bug.shows)}|${exact(bug.lacks)}|${exact(bug.error)}`
+      : `title:${exact(input.title)}`;
+  return fingerprint({
+    screenId: input.screenId ?? `unrecorded:${input.location}`,
+    ruleId: `explorer:${input.kind}`,
+    domNodeSignature: input.kind === 'other' && element ? `${subject}|title:${exact(input.title)}` : subject,
+  });
+}
+
 /** Where the app is: the location and the window, since one URL can host two windows. */
 function screenKey(observation: Observation): string {
   const active = observation.windows?.find((window) => window.active);
@@ -718,7 +764,9 @@ export function explorerTools(
         'Name how a replay can tell that the bug shows, with no one looking, in one or more of: shows (text on this ' +
         'screen only while the bug is there, like "NaN" or an error message), lacks (text that this screen should ' +
         'have and lacks), error (part of a console or network error that you saw). Bugpatrol checks each against ' +
-        'this screen. Without them, a fix of the bug cannot be proven by a replay.',
+        'this screen. Without them, a fix of the bug cannot be proven by a replay. ' +
+        'kind and element (the ref of the element the bug is about, from the latest list) are how a later session ' +
+        'knows the same bug, whatever words it uses; leave element out only when no element on screen shows the bug.',
       inputSchema: schema(
         {
           screen_id: string,
@@ -726,11 +774,21 @@ export function explorerTools(
           what_is_wrong: string,
           expected: string,
           severity: { type: 'string', enum: ['cosmetic', 'minor', 'major', 'critical'] },
+          kind: {
+            type: 'string',
+            enum: [...BUG_KINDS],
+            description:
+              'action: a control does nothing or the wrong thing. display: cut off, overlapping, unreadable, or ' +
+              'broken layout. data: a wrong, missing, or contradictory value. error: an error message, crash, blank ' +
+              'screen, or console or network error. loading: a loading state that does not end. navigation: a dead ' +
+              'end or the wrong screen. consistency: one thing named or styled two ways. other: none of these.',
+          },
+          element: string,
           shows: string,
           lacks: string,
           error: string,
         },
-        ['screen_id', 'title', 'what_is_wrong', 'expected', 'severity'],
+        ['screen_id', 'title', 'what_is_wrong', 'expected', 'severity', 'kind'],
       ),
       async run(input) {
         const title = arg(input, 'title');
@@ -743,6 +801,16 @@ export function explorerTools(
           if (value) bug[key] = value;
         }
         const observation = session.lastObservation!;
+        const ref = arg(input, 'element').trim();
+        const element = ref ? observation.elements.find((item) => item.ref === ref) : undefined;
+        if (ref && !element)
+          return {
+            ...text(
+              `Not reported: no element ${ref} on the screen you looked at last. Use a ref from the latest list.`,
+            ),
+            isError: true,
+          };
+        const kind = BUG_KINDS.find((item) => item === input.kind) ?? 'other';
         const misses = bugMisses(bug, observation, [
           ...observation.consoleErrors,
           ...(observation.networkErrors ?? []),
@@ -758,10 +826,14 @@ export function explorerTools(
           sessionId: session.sessionId,
           screenId,
           source: 'explorer',
-          fingerprint: fingerprint({
-            screenId: screenId ?? 'unknown',
-            ruleId: 'explorer',
-            domNodeSignature: title.toLowerCase(),
+          fingerprint: bugFingerprint({
+            screenId,
+            location: screenKey(observation),
+            kind,
+            element,
+            elements: observation.elements,
+            bug,
+            title,
           }),
           summary: session.vars.redact(title) as string,
           detail: session.vars.redact(`${arg(input, 'what_is_wrong')}\nExpected: ${arg(input, 'expected')}`) as string,
@@ -776,13 +848,19 @@ export function explorerTools(
           createdAt: new Date().toISOString(),
         };
         const decided = (await session.workspace.readTriage()).fingerprints[candidate.fingerprint];
+        // A match is by screen, kind and element, not by words: a different bug there gets a way out.
+        const different = kind === 'other' ? '' : ' If yours is a different bug, report it again with kind "other".';
         if (decided?.decision === 'dismissed')
-          return text(`Not reported: the QA lead dismissed this before (${decided.reason}). Continue.${fallback}`);
+          return text(
+            `Not reported: the QA lead dismissed this before (${decided.reason}).${different} Continue.${fallback}`,
+          );
         if (decided?.decision === 'filed' && decided.issueId) {
           const issue = await session.workspace.readIssue(decided.issueId);
           if (issue && issue.status !== 'fixed' && issue.status !== 'dismissed') {
             await addOccurrence(session, issue.id);
-            return text(`Already filed as ${issue.id}; counted one more occurrence.${fallback}`);
+            return text(
+              `Already filed as ${issue.id} (${JSON.stringify(issue.title)}); counted one more occurrence.${different}${fallback}`,
+            );
           }
         }
         await session.workspace.appendCandidate(session.sessionId, candidate);

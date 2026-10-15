@@ -123,6 +123,7 @@ WHAT TO REPORT
   Report one when it breaks what the user sees or does, for example data that does not load or an action
   that fails. Name the error in what_is_wrong. Do not report noise that has no effect on the user.
 - Use the id from record_screen for the screen you are on when you call report_bug. Use 'unrecorded' if needed.
+  Give its kind and the ref of the element it is about: that is how a later session knows the same bug.
 - A loading state that does not end. If a screen still shows a spinner or skeleton rows after two waits
   of 10 seconds, report it as a bug and continue somewhere else. Do not wait again and again.
 - A dead end: a screen with no way back.
