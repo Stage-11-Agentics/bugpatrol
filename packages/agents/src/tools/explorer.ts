@@ -152,13 +152,17 @@ type BugKind = (typeof BUG_KINDS)[number];
 /**
  * A reported bug's fingerprint, from facts that hold from one session to the
  * next: the screen (or, on no recorded screen, the location), the kind of
- * bug, and what it is about. That is the element's test id, or its role, the
- * words of its name (numbers and punctuation left out, since live values
- * tick) and, when several share those, its place among them, so "Tab 1" and
- * "Tab 2" stay apart. Its frame is left out: it moves with live text,
- * scrolling and the keyboard. Without an
- * element, the replay check; without either, the title. An `other` also
- * keeps its title, so two different bugs never share one for lack of a kind.
+ * bug, and what it is about. That is the element's test id. Else, for a
+ * control, its role and the words of its label (numbers and punctuation left
+ * out, since live values tick) and, when several share those, its place among
+ * them, so "Tab 1" and "Tab 2" stay apart. Else, for a text or an image, its
+ * role and its place among the elements of that role on screen: a text's
+ * words are often the state the bug is about, as Hum's header reads
+ * "blue · +3 dB/oct" in one session and "brown · -6 dB/oct" in the next. The
+ * frame is left out: it moves with live text, scrolling and the keyboard.
+ * Without an element, the replay check; without either, the title. An
+ * `other` also keeps its title, so two different bugs never share one for
+ * lack of a kind.
  */
 function bugFingerprint(input: {
   screenId?: string;
@@ -181,10 +185,13 @@ function bugFingerprint(input: {
   const named = (item: UiElement) =>
     `${item.role}:${item.name ? words(item.name) : item.near ? `~near ${words(item.near)}` : '~unnamed'}`;
   const twins = element ? input.elements.filter((item) => !item.testId && named(item) === named(element)) : [];
+  const siblings = element ? input.elements.filter((item) => !item.testId && item.role === element.role) : [];
   const subject = element
     ? element.testId
       ? `id:${element.testId}`
-      : `element:${named(element)}${twins.length > 1 ? `#${twins.indexOf(element)}` : ''}`
+      : element.interactive
+        ? `element:${named(element)}${twins.length > 1 ? `#${twins.indexOf(element)}` : ''}`
+        : `element:${element.role}@${siblings.indexOf(element)}`
     : Object.keys(bug).length
       ? `check:${exact(bug.shows)}|${exact(bug.lacks)}|${exact(bug.error)}`
       : `title:${exact(input.title)}`;

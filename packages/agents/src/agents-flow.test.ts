@@ -331,6 +331,65 @@ describe('explorer, replay, and judge', () => {
     }
   });
 
+  it("gives a text the same fingerprint when its words are the app's state", async () => {
+    const plain = parseConfig({ version: 1, app: { connect: { url: 'fake://home' } } });
+    const f = await fixture({ config: plain });
+    try {
+      const text = (ref: string, name: string, y: number) => ({
+        ...element(ref, name),
+        role: 'text',
+        interactive: false,
+        box: { x: 18, y, width: 104, height: 13 },
+      });
+      // Hum's noise header: the subtitle names the current color and its slope.
+      const noise = (subtitle: string) => [
+        text('e1', 'NOISE', 100),
+        text('e2', subtitle, 119),
+        { ...element('e3', ''), near: 'NOISE', box: { x: 338, y: 104, width: 46, height: 26 } },
+        text('e4', '+2.2', 400),
+      ];
+      const report = async (subtitle: string, input: Record<string, unknown>) => {
+        f.screens.home!.elements = noise(subtitle);
+        const record = await f.workspace.startSession('explorer');
+        const session = new AgentSession(f.root, plain, new Vars(), record.id, 'explorer', f.driver);
+        const tools = explorerTools(session);
+        await run(tools, 'look');
+        await run(tools, 'record_screen', { id: 'noise', name: 'Noise', description: 'The noise tab' });
+        await run(tools, 'report_bug', { screen_id: 'noise', expected: 'The knob value', severity: 'minor', ...input });
+        return (await f.workspace.readCandidates(record.id)).find((item) => item.source === 'explorer')!;
+      };
+      const session3 = await report('blue · +3 dB/oct', {
+        title: 'Header slope does not match the knob',
+        what_is_wrong: 'The header reads +3, the knob +2.2.',
+        kind: 'data',
+        element: 'e2',
+      });
+      const session4 = await report('brown · -6 dB/oct', {
+        title: 'Slope in the noise header disagrees with the knob',
+        what_is_wrong: 'Header -6, knob -5.4.',
+        kind: 'data',
+        element: 'e2',
+      });
+      expect(session4.fingerprint).toBe(session3.fingerprint);
+      // Another text on the same screen is another element.
+      const knob = await report('brown · -6 dB/oct', {
+        title: 'Knob',
+        what_is_wrong: 'x',
+        kind: 'data',
+        element: 'e4',
+      });
+      const title = await report('brown · -6 dB/oct', {
+        title: 'Title',
+        what_is_wrong: 'x',
+        kind: 'data',
+        element: 'e1',
+      });
+      expect(new Set([session3.fingerprint, knob.fingerprint, title.fingerprint]).size).toBe(3);
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+
   it('lists a control with no name by its role, place and nearest name, taps it by ref, and fingerprints it', async () => {
     const plain = parseConfig({ version: 1, app: { connect: { url: 'fake://home' } } });
     const f = await fixture({ config: plain });
