@@ -1,0 +1,214 @@
+import { describe, expect, it } from 'vitest';
+import {
+  appErrors,
+  HandsetDriver,
+  type HandsetExec,
+  type HandsetLogLine,
+  type HandsetTree,
+  handsetElements,
+  swipeDirection,
+} from './handset.js';
+
+// Recorded from `handset tree --json` on an iPhone 17 Pro simulator running Handset's Expo fixture.
+const tree: HandsetTree = {
+  w: 402,
+  h: 874,
+  unit: 'tap',
+  elements: [
+    {
+      ref: '@e1',
+      type: 'StaticText',
+      label: '0',
+      name: 'count',
+      id: 'count',
+      frame: { x: 181, y: 317, width: 39, height: 76 },
+    },
+    { ref: '@e2', type: 'StaticText', label: '0', name: '0', frame: { x: 181, y: 317, width: 39, height: 76 } },
+    {
+      ref: '@e3',
+      type: 'Button',
+      label: 'Dial',
+      name: 'dial-button',
+      id: 'dial-button',
+      frame: { x: 91, y: 418, width: 220, height: 68 },
+    },
+    {
+      ref: '@e4',
+      type: 'Button',
+      label: 'Settings',
+      name: 'settings-button',
+      id: 'settings-button',
+      frame: { x: 156, y: 511, width: 90, height: 45 },
+    },
+    {
+      ref: '@e5',
+      type: 'Image',
+      label: 'gearshape.fill',
+      name: 'gearshape.fill',
+      id: 'gearshape.fill',
+      frame: { x: 348, y: 96, width: 26, height: 26 },
+    },
+    { ref: '@e6', type: 'StaticText', label: '17:58', name: '17:58', frame: { x: 51, y: 22, width: 45, height: 20 } },
+    {
+      ref: '@e7',
+      type: 'Other',
+      name: '3 of 3 Wi-Fi bars',
+      id: '3 of 3 Wi-Fi bars',
+      value: 'SSID, 3 of 3 Wi-Fi bars',
+      frame: { x: 315, y: 26, width: 17, height: 12 },
+    },
+  ],
+};
+
+// Recorded from `handset log --id <lease> --json` on the same lease, trimmed.
+const lines: HandsetLogLine[] = [
+  {
+    t: '2026-10-14T21:52:44.000Z',
+    verb: 'app',
+    stage: 'log',
+    msg: 'nw_socket_handle_socket_event [C2.1.1.1:1] Socket SO_ERROR [61: Connection refused]',
+    data: { message_type: 'Error', process: 'expodial', subsystem: 'com.apple.network' },
+  },
+  {
+    t: '2026-10-14T21:52:51.865Z',
+    verb: 'app',
+    stage: 'log',
+    msg: 'expo-dial:mount',
+    data: { message_type: 'Info', process: 'expodial', subsystem: 'host.exp.dial' },
+  },
+  {
+    t: '2026-10-14T21:52:52.000Z',
+    verb: 'app',
+    stage: 'log',
+    msg: 'dial: count overflow',
+    data: { message_type: 'Error', process: 'expodial', subsystem: 'host.exp.dial' },
+  },
+  {
+    t: '2026-10-14T21:52:53.000Z',
+    verb: 'device',
+    stage: 'crash',
+    msg: 'expodial crashed: EXC_BAD_ACCESS',
+    data: { process: 'expodial' },
+  },
+  {
+    t: '2026-10-14T21:52:54.000Z',
+    verb: 'app',
+    msg: 'TypeError: undefined is not a function',
+    data: { level: 'error' },
+  },
+  { t: '2026-10-14T21:52:55.000Z', verb: 'tree', stage: 'tree', msg: '', data: {} },
+];
+
+describe('handsetElements', () => {
+  const elements = handsetElements(tree, 'ios');
+
+  it('drops the status bar and the duplicate static text', () => {
+    expect(elements.map((element) => element.name)).toEqual(['0', 'Dial', 'Settings', 'gearshape.fill']);
+  });
+
+  it('keeps identifiers the app set and refs Bugpatrol owns', () => {
+    expect(elements.map((element) => [element.ref, element.role, element.testId])).toEqual([
+      ['e1', 'text', 'count'],
+      ['e2', 'button', 'dial-button'],
+      ['e3', 'button', 'settings-button'],
+      ['e4', 'image', undefined],
+    ]);
+  });
+
+  it('keeps boxes in tap units', () => {
+    expect(elements[1]!.box).toEqual({ x: 91, y: 418, width: 220, height: 68 });
+  });
+});
+
+describe('appErrors', () => {
+  it('reports the app and its crashes, not framework chatter', () => {
+    expect(appErrors(lines, 0)).toEqual([
+      'expodial: dial: count overflow',
+      'crash: expodial crashed: EXC_BAD_ACCESS',
+      'TypeError: undefined is not a function',
+    ]);
+  });
+
+  it('skips lines already reported', () => {
+    expect(appErrors(lines, Date.parse('2026-10-14T21:52:53.000Z'))).toEqual([
+      'TypeError: undefined is not a function',
+    ]);
+  });
+});
+
+describe('swipeDirection', () => {
+  it('moves the finger against the scroll', () => {
+    expect(['up', 'down', 'left', 'right'].map((d) => swipeDirection(d as 'up'))).toEqual([
+      'down',
+      'up',
+      'right',
+      'left',
+    ]);
+  });
+});
+
+describe('HandsetDriver', () => {
+  const envelope = (verb: string, data: unknown, error: unknown = null) =>
+    JSON.stringify({ ok: error === null, verb, cid: `${verb}_1`, data, error });
+
+  function fake(answers: Record<string, string>) {
+    const calls: string[][] = [];
+    const exec: HandsetExec = async (args) => {
+      calls.push(args);
+      const verb = args[0]!;
+      const label = args[args.indexOf('--label') + 1];
+      return answers[`${verb}:${label}`] ?? answers[verb] ?? envelope(verb, {});
+    };
+    return { calls, exec };
+  }
+
+  it('taps an observed element at its centre on the lease', async () => {
+    const { calls, exec } = fake({ tree: envelope('tree', tree) });
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    (driver as unknown as { lastObservation: unknown }).lastObservation = { elements: handsetElements(tree, 'ios') };
+    const result = await driver.act({ kind: 'tap', ref: 'e2' });
+    expect(result.ok).toBe(true);
+    expect(calls.at(-1)).toEqual(['tap', '--lease', 'ls_1', '--x', '201', '--y', '452', '--json']);
+    expect(result.step).toMatchObject({ kind: 'tap', target: { testId: 'dial-button' } });
+  });
+
+  it('replays a recorded locator by id before falling back to the point', async () => {
+    const { calls, exec } = fake({
+      'tap:dial-button': envelope('tap', null, { code: 'not_found', message: 'no element', lesson: null }),
+      'tap:Dial': envelope('tap', {}),
+    });
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    const result = await driver.act({
+      kind: 'tap',
+      locator: { testId: 'dial-button', name: 'Dial', point: { x: 201, y: 452 } },
+    });
+    expect(result).toMatchObject({ ok: true });
+    expect(result.degraded).toBeUndefined();
+    expect(calls.map((call) => call[call.indexOf('--label') + 1])).toEqual(['dial-button', 'Dial']);
+  });
+
+  it('reports a Handset failure as the device, retryable, with the known fix', async () => {
+    const { exec } = fake({
+      swipe: envelope('swipe', null, {
+        code: 'busy',
+        message: 'a flow holds the driver',
+        lesson: { fix: 'wait for the flow' },
+      }),
+    });
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    const result = await driver.act({ kind: 'scroll', direction: 'down' });
+    expect(result.ok).toBe(false);
+    expect(result.retryable).toBe(true);
+    expect(result.error).toContain('device, not app');
+    expect(result.error).toContain('wait for the flow');
+  });
+
+  it('says plainly what Handset cannot do yet', async () => {
+    const driver = new HandsetDriver('android', { lease: 'ls_1' }, fake({}).exec);
+    expect(await driver.act({ kind: 'back' })).toEqual({
+      ok: false,
+      error: 'Handset has no key verb for Android back yet',
+    });
+    expect((await driver.act({ kind: 'open', url: 'matet://ride' })).ok).toBe(false);
+  });
+});

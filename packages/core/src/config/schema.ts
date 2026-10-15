@@ -207,6 +207,17 @@ export const appSchema = z
         appId: z.string().optional(),
         /** Mobile: the simulator UDID or emulator serial. Default: the booted one. */
         device: z.string().optional(),
+        /**
+         * Mobile: drive a device leased from a Handset hub instead of the booted
+         * one. `lease` is usually captured in `app.setup` from `handset lease --json`.
+         */
+        handset: z
+          .object({
+            lease: z.string(),
+            bin: z.string().default('handset'),
+            timeoutMs: z.number().int().positive().default(60_000),
+          })
+          .optional(),
       })
       .default({}),
     /** Plain-English guide for the explorer: login, onboarding, never-do list. */
