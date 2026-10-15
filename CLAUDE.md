@@ -6,6 +6,10 @@ leased devices. Never push to upstream; an upstream pull request goes from a bra
 upstream's `main`. `README.md` and `CONTRIBUTING.md` govern the code; this file covers what the
 fork adds. `AGENTS.md` is a symlink to this file.
 
+A checkout with both remotes and no `gh` default sends `gh pr`, `gh run` and `gh workflow` to
+upstream. Run `gh repo set-default Stage-11-Agentics/bugpatrol` once per checkout, or pass
+`-R Stage-11-Agentics/bugpatrol`.
+
 ## CI: the Fast workflow
 
 `.github/workflows/fast.yml` runs on every pull request and every push to `main`, as two parallel
