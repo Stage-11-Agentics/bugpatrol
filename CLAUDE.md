@@ -15,11 +15,13 @@ jobs: `lint` (Biome, knip) and `test` (the TypeScript build and the hermetic tes
   pull request 60 s. Over budget is a defect: move the slowest test out or make it faster, and
   never raise a budget or a timeout to make a run fit. Each job's last step prints its clock and
   raises an `Over budget` warning. Hard caps: 1 minute on push, 2 on a pull request.
-- **Measured** (cold: no TypeScript cache; warm: restored):
+- **Measured** on GitHub's job clock (cold: no TypeScript cache; warm: restored):
 
   | Event | Cache | lint | test | Run |
   |---|---|---|---|---|
-  | pull request | cold | 23 s | 40 s | 38796195585 |
+  | push | cold | 18 s | 30 s | 38797995591 |
+  | pull request | cold | 18 s | 43 s | 38796806537 |
+  | pull request | warm | 15 s | 34 s | 38798003700 |
 
 - **Where the speed comes from.** No dependency cache: restoring the 228 MB pnpm store takes 5 s,
   installing from the registry 3 to 6 s. No `actions/setup-node`: the runner image's Node is 22,
