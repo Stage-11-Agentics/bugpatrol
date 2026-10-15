@@ -259,7 +259,8 @@ describe('explorer, replay, and judge', () => {
     try {
       f.screens.home!.elements = [
         { ...element('e1', 'MAX SPD --'), role: 'text', interactive: false },
-        { ...element('e2', 'Range 12 km'), role: 'text', interactive: false },
+        // A control, whose label keeps its words: a ticking number in it is left out.
+        element('e2', 'Range 12 km'),
       ];
       const report = async (session: AgentSession, input: Record<string, unknown>) => {
         const tools = explorerTools(session);
@@ -326,6 +327,114 @@ describe('explorer, replay, and judge', () => {
         element: 'e1',
       });
       expect(clipped.fingerprint).not.toBe(first.fingerprint);
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+
+  it("gives a text the same fingerprint when its words are the app's state", async () => {
+    const plain = parseConfig({ version: 1, app: { connect: { url: 'fake://home' } } });
+    const f = await fixture({ config: plain });
+    try {
+      const text = (ref: string, name: string, y: number) => ({
+        ...element(ref, name),
+        role: 'text',
+        interactive: false,
+        box: { x: 18, y, width: 104, height: 13 },
+      });
+      // Hum's noise header: the subtitle names the current color and its slope.
+      const noise = (subtitle: string) => [
+        text('e1', 'NOISE', 100),
+        text('e2', subtitle, 119),
+        { ...element('e3', ''), near: 'NOISE', box: { x: 338, y: 104, width: 46, height: 26 } },
+        text('e4', '+2.2', 400),
+      ];
+      const report = async (subtitle: string, input: Record<string, unknown>) => {
+        f.screens.home!.elements = noise(subtitle);
+        const record = await f.workspace.startSession('explorer');
+        const session = new AgentSession(f.root, plain, new Vars(), record.id, 'explorer', f.driver);
+        const tools = explorerTools(session);
+        await run(tools, 'look');
+        await run(tools, 'record_screen', { id: 'noise', name: 'Noise', description: 'The noise tab' });
+        await run(tools, 'report_bug', { screen_id: 'noise', expected: 'The knob value', severity: 'minor', ...input });
+        return (await f.workspace.readCandidates(record.id)).find((item) => item.source === 'explorer')!;
+      };
+      const session3 = await report('blue · +3 dB/oct', {
+        title: 'Header slope does not match the knob',
+        what_is_wrong: 'The header reads +3, the knob +2.2.',
+        kind: 'data',
+        element: 'e2',
+      });
+      const session4 = await report('brown · -6 dB/oct', {
+        title: 'Slope in the noise header disagrees with the knob',
+        what_is_wrong: 'Header -6, knob -5.4.',
+        kind: 'data',
+        element: 'e2',
+      });
+      expect(session4.fingerprint).toBe(session3.fingerprint);
+      // Another text on the same screen is another element.
+      const knob = await report('brown · -6 dB/oct', {
+        title: 'Knob',
+        what_is_wrong: 'x',
+        kind: 'data',
+        element: 'e4',
+      });
+      const title = await report('brown · -6 dB/oct', {
+        title: 'Title',
+        what_is_wrong: 'x',
+        kind: 'data',
+        element: 'e1',
+      });
+      expect(new Set([session3.fingerprint, knob.fingerprint, title.fingerprint]).size).toBe(3);
+      // A banner above the header changes nothing for the subtitle or the title, and has its own.
+      const banner = async (input: Record<string, unknown>) => {
+        const record = await f.workspace.startSession('explorer');
+        f.screens.home!.elements = [text('e0', 'Update ready', 60), ...noise('pink · -3 dB/oct')];
+        const session = new AgentSession(f.root, plain, new Vars(), record.id, 'explorer', f.driver);
+        const tools = explorerTools(session);
+        await run(tools, 'look');
+        await run(tools, 'record_screen', { id: 'noise', name: 'Noise', description: 'The noise tab' });
+        await run(tools, 'report_bug', {
+          screen_id: 'noise',
+          expected: 'x',
+          severity: 'minor',
+          kind: 'data',
+          ...input,
+        });
+        return (await f.workspace.readCandidates(record.id)).find((item) => item.source === 'explorer')!;
+      };
+      expect((await banner({ title: 'Slope', what_is_wrong: 'x', element: 'e2' })).fingerprint).toBe(
+        session3.fingerprint,
+      );
+      expect((await banner({ title: 'Title', what_is_wrong: 'y', element: 'e1' })).fingerprint).toBe(title.fingerprint);
+      expect((await banner({ title: 'Banner', what_is_wrong: 'z', element: 'e0' })).fingerprint).not.toBe(
+        title.fingerprint,
+      );
+      // A value that goes away under a label splits the next value's bug rather than merging it with the first's.
+      const ride = async (elements: FakeScreen['elements'], ref: string) => {
+        const record = await f.workspace.startSession('explorer');
+        f.screens.home!.elements = elements;
+        const session = new AgentSession(f.root, plain, new Vars(), record.id, 'explorer', f.driver);
+        const tools = explorerTools(session);
+        await run(tools, 'look');
+        await run(tools, 'record_screen', { id: 'hud', name: 'HUD', description: 'The ride' });
+        await run(tools, 'report_bug', {
+          screen_id: 'hud',
+          expected: 'x',
+          severity: 'minor',
+          kind: 'data',
+          title: 'Wrong',
+          what_is_wrong: 'x',
+          element: ref,
+        });
+        return (await f.workspace.readCandidates(record.id)).find((item) => item.source === 'explorer')!;
+      };
+      const distance = await ride(
+        [text('e1', 'RIDE', 100), text('e2', '12.3 km', 120), text('e3', 'Max 30 km/h', 140)],
+        'e2',
+      );
+      const max = await ride([text('e1', 'RIDE', 100), text('e2', 'Max 30 km/h', 140)], 'e2');
+      expect(max.fingerprint).not.toBe(distance.fingerprint);
     } finally {
       await rm(f.root, { recursive: true, force: true });
     }
