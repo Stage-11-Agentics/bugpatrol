@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@v7
       # node_modules itself and corepack's copy of pnpm, for the exact
       # lockfile and package.json files. A hit reaches no registry: installs
-      # took 3-8 s and once 46 s, and pnpm/action-setup's download of pnpm
+      # took 3-51 s, and pnpm/action-setup's download of pnpm
       # 1-20 s.
       - id: deps
         uses: actions/cache/restore@v6
