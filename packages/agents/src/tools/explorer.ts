@@ -153,16 +153,19 @@ type BugKind = (typeof BUG_KINDS)[number];
  * A reported bug's fingerprint, from facts that hold from one session to the
  * next: the screen (or, on no recorded screen, the location), the kind of
  * bug, and what it is about. That is the element's test id. Else, for a
- * control, its role and the words of its label (numbers and punctuation left
- * out, since live values tick) and, when several share those, its place among
- * them, so "Tab 1" and "Tab 2" stay apart. Else, for a text or an image, its
- * role and its place among the elements of that role on screen: a text's
- * words are often the state the bug is about, as Hum's header reads
+ * text, the name it follows and its place after that name: a text's words
+ * are often the state the bug is about, as Hum's header reads
  * "blue · +3 dB/oct" in one session and "brown · -6 dB/oct" in the next. The
- * frame is left out: it moves with live text, scrolling and the keyboard.
- * Without an element, the replay check; without either, the title. An
- * `other` also keeps its title, so two different bugs never share one for
- * lack of a kind.
+ * name it follows is the nearest earlier one with letters and no digits (a
+ * header or a label, not a value), so a banner above or a scroll that keeps
+ * that name on screen changes nothing, and two texts merge only under the
+ * same name in the same place. Else, for a control or an image, its role and
+ * the words of its name (numbers and punctuation left out, since live values
+ * tick) and, when several share those, its place among them, so "Tab 1" and
+ * "Tab 2" stay apart. The frame is left out: it moves with live text,
+ * scrolling and the keyboard. Without an element, the replay check; without
+ * either, the title. An `other` also keeps its title, so two different bugs
+ * never share one for lack of a kind.
  */
 function bugFingerprint(input: {
   screenId?: string;
@@ -185,13 +188,21 @@ function bugFingerprint(input: {
   const named = (item: UiElement) =>
     `${item.role}:${item.name ? words(item.name) : item.near ? `~near ${words(item.near)}` : '~unnamed'}`;
   const twins = element ? input.elements.filter((item) => !item.testId && named(item) === named(element)) : [];
-  const siblings = element ? input.elements.filter((item) => !item.testId && item.role === element.role) : [];
+  const follows = (item: UiElement) => {
+    const before = input.elements.slice(0, input.elements.indexOf(item)).reverse();
+    const anchor = before.find((other) => /\p{L}/u.test(other.name) && !/\d/.test(other.name));
+    return `text after ${anchor ? words(anchor.name) : '~start'}`;
+  };
+  const after =
+    element?.role === 'text'
+      ? input.elements.filter((item) => item.role === 'text' && follows(item) === follows(element))
+      : [];
   const subject = element
     ? element.testId
       ? `id:${element.testId}`
-      : element.interactive
-        ? `element:${named(element)}${twins.length > 1 ? `#${twins.indexOf(element)}` : ''}`
-        : `element:${element.role}@${siblings.indexOf(element)}`
+      : element.role === 'text'
+        ? `element:${follows(element)}#${after.indexOf(element)}`
+        : `element:${named(element)}${twins.length > 1 ? `#${twins.indexOf(element)}` : ''}`
     : Object.keys(bug).length
       ? `check:${exact(bug.shows)}|${exact(bug.lacks)}|${exact(bug.error)}`
       : `title:${exact(input.title)}`;

@@ -259,7 +259,8 @@ describe('explorer, replay, and judge', () => {
     try {
       f.screens.home!.elements = [
         { ...element('e1', 'MAX SPD --'), role: 'text', interactive: false },
-        { ...element('e2', 'Range 12 km'), role: 'text', interactive: false },
+        // A control, whose label keeps its words: a ticking number in it is left out.
+        element('e2', 'Range 12 km'),
       ];
       const report = async (session: AgentSession, input: Record<string, unknown>) => {
         const tools = explorerTools(session);
@@ -385,6 +386,29 @@ describe('explorer, replay, and judge', () => {
         element: 'e1',
       });
       expect(new Set([session3.fingerprint, knob.fingerprint, title.fingerprint]).size).toBe(3);
+      // A banner above the header changes nothing for the subtitle, and the title, now second on screen,
+      // does not take the subtitle's fingerprint as a place on screen would.
+      const banner = async (input: Record<string, unknown>) => {
+        const record = await f.workspace.startSession('explorer');
+        f.screens.home!.elements = [text('e0', 'Update ready', 60), ...noise('pink · -3 dB/oct')];
+        const session = new AgentSession(f.root, plain, new Vars(), record.id, 'explorer', f.driver);
+        const tools = explorerTools(session);
+        await run(tools, 'look');
+        await run(tools, 'record_screen', { id: 'noise', name: 'Noise', description: 'The noise tab' });
+        await run(tools, 'report_bug', {
+          screen_id: 'noise',
+          expected: 'x',
+          severity: 'minor',
+          kind: 'data',
+          ...input,
+        });
+        return (await f.workspace.readCandidates(record.id)).find((item) => item.source === 'explorer')!;
+      };
+      expect((await banner({ title: 'Slope', what_is_wrong: 'x', element: 'e2' })).fingerprint).toBe(
+        session3.fingerprint,
+      );
+      const titled = await banner({ title: 'Title is wrong', what_is_wrong: 'x', element: 'e1' });
+      expect(titled.fingerprint).not.toBe(session3.fingerprint);
     } finally {
       await rm(f.root, { recursive: true, force: true });
     }
