@@ -1,3 +1,22 @@
+# Fast: Stage 11's push and pull request tier for this fork.
+#
+# Speed is the point of this workflow. Each job holds a budget on its job
+# clock (from the runner starting the job to its last step; queue time is not
+# counted):
+#
+#   push to main    30 s
+#   pull request    60 s
+#
+# Over budget is a defect, not a cost. Move the slowest test out
+# (.github/fast/quarantine.txt), cut the step, or make it faster. Never raise
+# a budget or a timeout to make a run fit. The last step of each job reports
+# its clock and warns when it is over.
+#
+# It runs what a clean runner can run in seconds: Biome, knip, the TypeScript
+# build, and the hermetic tests. Tests that need Playwright's Chromium or
+# ffmpeg, slow ones and flaky ones are listed, with the reason, in
+# .github/fast/quarantine.txt. The upstream workflows (ci.yml and the rest)
+# are disabled on this fork with `gh workflow disable`; see CLAUDE.md.
 name: Fast
 
 on:
@@ -7,83 +26,71 @@ on:
 
 permissions:
   contents: read
-  actions: read
+  actions: read # the clock step reads the job's start time
+
+concurrency:
+  group: fast-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  HERMETIC_EXCLUDES: --exclude packages/capture/src/font-audit.test.ts --exclude packages/capture/src/probe.test.ts --exclude packages/drivers/src/dom.test.ts --exclude packages/drivers/src/api.test.ts --exclude packages/drivers/src/recording.test.ts --exclude packages/agents/src/api-replay.test.ts
+  FAST_BUDGET: ${{ github.event_name == 'pull_request' && 60 || 30 }}
 
 jobs:
-  tsc:
+  lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 2 || 1 }}
     steps:
       - uses: actions/checkout@v4
+      # The version comes from package.json's packageManager.
       - uses: pnpm/action-setup@v4
+      # No dependency cache: restoring the pnpm store (228 MB) takes longer
+      # than installing from the registry.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: time pnpm install --frozen-lockfile --prefer-offline
-      - name: noCheck cold
-        run: time pnpm exec tsc --build --noCheck
-        continue-on-error: true
-      - run: pnpm exec tsc --build --clean; du -sh packages/*/dist 2>/dev/null | tail -3 || true
-      - name: full cold
-        run: time pnpm exec tsc --build
-      - run: du -ch packages/*/dist packages/*/*.tsbuildinfo 2>/dev/null | tail -1; ls packages/core; ls packages/core/dist | grep -i buildinfo || true; find packages -name '*.tsbuildinfo' -not -path '*/node_modules/*' | head
-      - name: warm with fresh mtimes and one edit
-        run: |
-          find packages -path '*/src/*' -name '*.ts' -not -path '*/node_modules/*' -exec touch {} +
-          echo '// edit' >> packages/agents/src/explorer.ts
-          time pnpm exec tsc --build
-      - name: warm with fresh mtimes and one edit in core
-        run: |
-          find packages -path '*/src/*' -name '*.ts' -not -path '*/node_modules/*' -exec touch {} +
-          echo 'export const fastCiProbe = 1;' >> packages/core/src/index.ts
-          time pnpm exec tsc --build
+      # knip reads every workspace, the site too, so this job installs it all.
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check --error-on-warnings
+      - run: pnpm knip
+      - name: Job clock
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/fast/clock.sh
 
-  vitest:
+  test:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 2 || 1 }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: time pnpm install --frozen-lockfile --prefer-offline
-      - run: time pnpm exec tsc --build
-      - name: hermetic no-isolate
-        run: time pnpm exec vitest run --no-isolate $HERMETIC_EXCLUDES --exclude packages/agents/src/review.test.ts
-        continue-on-error: true
-      - name: hermetic no-isolate again
-        run: time pnpm exec vitest run --no-isolate $HERMETIC_EXCLUDES --exclude packages/agents/src/review.test.ts
-        continue-on-error: true
-      - name: hermetic maxWorkers 4
-        run: time pnpm exec vitest run --maxWorkers=4 --minWorkers=4 $HERMETIC_EXCLUDES --exclude packages/agents/src/review.test.ts
-        continue-on-error: true
-      - name: hermetic with review, no-isolate
-        run: time pnpm exec vitest run --no-isolate $HERMETIC_EXCLUDES
-        continue-on-error: true
-      - name: hermetic with review, default
-        run: time pnpm exec vitest run $HERMETIC_EXCLUDES
-        continue-on-error: true
-      - name: review alone, verbose
-        run: time pnpm exec vitest run --reporter=verbose packages/agents/src/review.test.ts 2>&1 | grep -E '[0-9]{3,}ms|Duration|Tests ' | sed -E 's/\x1b\[[0-9;]*m//g' | sort -t' ' -k1 | tail -60
-        continue-on-error: true
-
-  deps:
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      # TypeScript's incremental build: dist and tsconfig.tsbuildinfo, which
+      # record each file by a hash of its content, so a stale cache costs
+      # time, never correctness.
+      - id: tsc-cache
+        uses: actions/cache/restore@v4
         with:
-          node-version: 22
-      - name: filtered install
-        run: time pnpm install --frozen-lockfile --prefer-offline --filter '!@bugpatrol/site'
-      - run: du -sh node_modules/.pnpm
-      - run: time pnpm check --error-on-warnings
-        continue-on-error: true
-      - run: time pnpm knip
-        continue-on-error: true
+          path: packages/*/dist
+          key: tsc-${{ runner.os }}-${{ github.sha }}
+          restore-keys: tsc-${{ runner.os }}-
+      # The tests and the build need no site, so it is not installed.
+      - run: pnpm install --frozen-lockfile --filter '!@bugpatrol/site'
+      - id: build
+        name: Typecheck and build
+        run: pnpm exec tsc --build
+      - name: Hermetic tests
+        timeout-minutes: 1
+        run: bash .github/fast/test.sh
+      - if: always() && steps.build.outcome == 'success' && steps.tsc-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: packages/*/dist
+          key: tsc-${{ runner.os }}-${{ github.sha }}
+      - name: Job clock
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/fast/clock.sh

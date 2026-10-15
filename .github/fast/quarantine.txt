@@ -1,0 +1,26 @@
+# Tests the Fast workflow (.github/workflows/fast.yml) leaves out.
+#
+# Fast holds a budget (push 30 s, pull request 60 s, on the job clock). A test
+# that is too slow for it, needs a tool the runner lacks, or flakes comes out
+# here the day it is found, with its reason. Fix it and delete its line.
+#
+# One entry per line, its reason after the #:
+#   <path>          a test file Fast never runs
+#   push: <path>    a test file Fast runs on pull requests only
+#   test: <name>    one test Fast skips by its exact name, wherever it is
+
+# Every test in these files launches Playwright's Chromium, which Fast does not install.
+packages/capture/src/font-audit.test.ts    # Chromium
+packages/capture/src/probe.test.ts         # Chromium
+packages/drivers/src/dom.test.ts           # Chromium
+packages/drivers/src/api.test.ts           # Chromium
+packages/agents/src/api-replay.test.ts     # Chromium
+packages/drivers/src/recording.test.ts     # Chromium and ffmpeg, 3 of its 4 tests
+
+# 16 s on its own in one worker, which alone breaks the push budget.
+push: packages/agents/src/review.test.ts   # slow
+
+test: records the replay on both builds, and shows both recordings side by side with the full videos   # ffmpeg
+test: checks status and body on both builds with no model, and shows both HTTP transcripts as terminal recordings   # Chromium
+test: replays the same requests on both builds, and ignores generated ids, times and key order   # Chromium
+test: picks up .bugpatrol created after start   # flaky: waits a fixed 700 ms for a file watcher
