@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appSchema, InfrastructureError } from '@bugpatrol/core';
@@ -7,6 +7,37 @@ import { startApp } from './lifecycle.js';
 import { Vars } from './vars.js';
 
 describe('startApp', () => {
+  it("tells Handset, before setup runs, that Bugpatrol's folder is not app source", async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bugpatrol-life-'));
+    try {
+      await mkdir(join(root, '.bugpatrol'));
+      await writeFile(join(root, '.bugpatrol', 'bugpatrol.yml'), 'version: 1\n');
+      await writeFile(join(root, '.handsetignore'), 'fixtures/');
+      const app = appSchema.parse({
+        connect: { handset: { lease: '${LEASE}' } },
+        // `handset run` in setup must already see the line.
+        setup: [{ run: 'grep -qx ".bugpatrol/" .handsetignore' }],
+      });
+      await (await startApp(app, { root, vars: new Vars() })).stop();
+      await (await startApp(app, { root, vars: new Vars() })).stop();
+      expect(await readFile(join(root, '.handsetignore'), 'utf8')).toBe(
+        "fixtures/\n# Bugpatrol's own files (config, app map, routines, run data) are not app source.\n.bugpatrol/\n",
+      );
+      // A fixer's worktree must not gain a file in its diff, and an app not driven through Handset needs none.
+      const worktree = await mkdtemp(join(tmpdir(), 'bugpatrol-life-wt-'));
+      const leased = appSchema.parse({ connect: { handset: { lease: '${LEASE}' } } });
+      await (await startApp(leased, { root, vars: new Vars(), source: worktree })).stop();
+      await expect(readFile(join(worktree, '.handsetignore'), 'utf8')).rejects.toThrow();
+      await rm(worktree, { recursive: true, force: true });
+      const plain = await mkdtemp(join(tmpdir(), 'bugpatrol-life-plain-'));
+      await (await startApp(appSchema.parse({}), { root: plain, vars: new Vars() })).stop();
+      await expect(readFile(join(plain, '.handsetignore'), 'utf8')).rejects.toThrow();
+      await rm(plain, { recursive: true, force: true });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('captures values for later commands and keeps a ready background process', async () => {
     const root = await mkdtemp(join(tmpdir(), 'bugpatrol-life-'));
     const vars = new Vars();
