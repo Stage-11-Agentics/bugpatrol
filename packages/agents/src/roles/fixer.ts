@@ -618,7 +618,8 @@ async function attemptsPrompt(
 /** What a step acted on, in words: its name, or, for a control with none, the name nearest it. */
 function targetWords(target: Locator): string {
   const unnamed = target.near ? `the unnamed ${target.role ?? 'control'} near "${target.near}"` : '';
-  return target.name || unnamed || target.testId || target.text || target.selector || 'target';
+  const anonymous = target.role ? `the unnamed ${target.role}` : 'target';
+  return target.name || unnamed || target.testId || target.text || target.selector || anonymous;
 }
 
 export function stepWords(step: RoutineStep): string {

@@ -207,7 +207,11 @@ function transition(session: AgentSession, to: string): ScreenTransition | undef
         : 'other';
   const label =
     last.kind === 'tap'
-      ? last.target.name || last.target.text || last.target.testId || 'tap'
+      ? last.target.name ||
+        (last.target.near ? `near ${last.target.near}` : '') ||
+        last.target.text ||
+        last.target.testId ||
+        'tap'
       : last.kind === 'open'
         ? `open ${last.url}`
         : last.kind === 'window'
@@ -219,7 +223,7 @@ function transition(session: AgentSession, to: string): ScreenTransition | undef
               : last.kind === 'press'
                 ? `press ${last.key}`
                 : last.kind === 'type'
-                  ? last.target?.name || last.target?.near || 'submit'
+                  ? last.target?.name || (last.target?.near ? `near ${last.target.near}` : '') || 'submit'
                   : last.kind;
   const via = (session.vars.redact(label) as string).slice(0, 60);
   return { to, kind, via, steps: actions.length, count: 1, lastSeenAt: new Date().toISOString() };

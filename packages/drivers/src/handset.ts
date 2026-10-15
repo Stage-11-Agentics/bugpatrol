@@ -94,39 +94,45 @@ const defaultExec =
 const STATUS_BAR = { ios: 54, android: 24 } as const;
 const TEXTBOX = /TextField|SecureTextField|SearchField|TextView|EditText/i;
 const BUTTON = /Button|Cell|Link|Tab|MenuItem|Switch|Toggle|CheckBox|Slider|Picker|ImageButton/i;
-/** Types that hold controls rather than being one. With no name they are dropped; a cell's own texts name it. */
-const HOLDER = /Table|TabBar|TabGroup|Toolbar|NavigationBar|CollectionView|ScrollView|Cell|List|Grid|Group/i;
+/** Android's label class and its subclasses. iOS's TextView, and Android's EditText and AutoCompleteTextView, take text. */
+const ANDROID_LABEL = /^[\w.]+\.(\w*(?<!Edit|AutoComplete))TextView$/;
+/** Types that hold controls rather than being one. With no name, one is dropped when something kept lies inside it. */
+const HOLDER =
+  /Table|TabBar|TabGroup|TabLayout|TabWidget|TabHost|Toolbar|NavigationBar|CollectionView|ScrollView|Cell|List|Grid|Group/i;
 
 /** The Handset tree in Bugpatrol's normalised element shape, with system chrome removed. */
 export function handsetElements(tree: HandsetTree, platform: 'ios' | 'android'): UiElement[] {
   const seen = new Set<string>();
   const elements: UiElement[] = [];
+  const holders = new Set<UiElement>();
   for (const node of tree.elements) {
     const box = node.frame;
     if (!box || box.width <= 0 || box.height <= 0) continue;
     const name = (node.label || node.name || node.text || node.value || node.id || '').trim();
     const type = node.type ?? '';
-    const role = TEXTBOX.test(type)
-      ? 'textbox'
-      : BUTTON.test(type)
-        ? type.match(/Switch|Toggle|CheckBox/i)
-          ? 'switch'
-          : 'button'
-        : /StaticText|TextView$/i.test(type)
-          ? 'text'
-          : /Image/i.test(type)
-            ? 'image'
-            : 'group';
+    const role = ANDROID_LABEL.test(type)
+      ? 'text'
+      : TEXTBOX.test(type)
+        ? 'textbox'
+        : BUTTON.test(type)
+          ? type.match(/Switch|Toggle|CheckBox/i)
+            ? 'switch'
+            : 'button'
+          : /StaticText|TextView$/i.test(type)
+            ? 'text'
+            : /Image/i.test(type)
+              ? 'image'
+              : 'group';
     const interactive = role === 'button' || role === 'textbox' || role === 'switch';
     // A control with no name is still a control: Hum's toggles are buttons with no label.
-    if (!name && (!interactive || HOLDER.test(type))) continue;
+    if (!name && !interactive) continue;
     // iOS reports a static text twice, once by identifier and once by value, on one frame.
     const key = `${node.label ?? name}|${box.x},${box.y},${box.width},${box.height}`;
     if (seen.has(key)) continue;
     seen.add(key);
     // An id equal to the visible label is the platform's fallback, not an identifier the app set.
     const testId = node.id && node.id !== (node.label || node.name) ? node.id : undefined;
-    elements.push({
+    const element: UiElement = {
       ref: '',
       role,
       name,
@@ -136,13 +142,26 @@ export function handsetElements(tree: HandsetTree, platform: 'ios' | 'android'):
       box: { x: box.x, y: box.y, width: box.width, height: box.height },
       interactive,
       enabled: true,
-    });
+    };
+    elements.push(element);
+    if (!name && HOLDER.test(type)) holders.add(element);
+  }
+  // An unnamed table, tab bar or cell is dropped when what it holds names itself; a cell of
+  // unnamed images (a swatch or photo grid) is kept, since nothing else would reach it. Inner first.
+  const byArea = [...holders].sort((p, q) => p.box.width * p.box.height - q.box.width * q.box.height);
+  for (const holder of byArea) {
+    if (elements.some((item) => item !== holder && !holders.has(item) && inside(item.box, holder.box))) {
+      holders.delete(holder);
+      elements.splice(elements.indexOf(holder), 1);
+    } else {
+      holders.delete(holder);
+    }
   }
   const kept = pruneSystemChrome(elements, { width: tree.w, height: tree.h }, STATUS_BAR[platform]);
   // Tap units are points on iOS and pixels on Android, so the reach is a share of the screen's width.
   const reach = tree.w * NEAR_ROW;
   return kept.map((element) => {
-    const near = element.name ? undefined : nearestName(element, kept, reach);
+    const near = element.name ? undefined : nearestName(element, kept, reach, tree.w / 402);
     return near ? { ...element, near } : element;
   });
 }
@@ -156,11 +175,12 @@ const NEAR_ROW = 0.11;
  * the leftmost name before it with no other control between them (a settings
  * row puts its label at the far left, then perhaps a value, then the
  * toggle); else the nearest name after it (a checkbox before its label).
- * Then the row just above or below, within `reach`. A text is preferred to
- * another control's name, which would read as that control. An element that
- * holds the control is around it, not near it.
+ * Then the row just above or below, within `reach`. Texts are searched
+ * first, then images (a leading icon), then other controls, whose name would
+ * read as that control. An element that holds the control is around it, not
+ * near it. `unit` is tap units per point.
  */
-function nearestName(target: UiElement, elements: UiElement[], reach: number): string | undefined {
+function nearestName(target: UiElement, elements: UiElement[], reach: number, unit: number): string | undefined {
   const a = target.box;
   const area = (box: UiElement['box']) => box.width * box.height;
   const sameRow = (b: UiElement['box']) => b.y < a.y + a.height && a.y < b.y + b.height;
@@ -173,9 +193,11 @@ function nearestName(target: UiElement, elements: UiElement[], reach: number): s
     dx: Math.max(0, b.x - (a.x + a.width), a.x - (b.x + b.width)),
     dy: Math.max(0, b.y - (a.y + a.height), a.y - (b.y + b.height)),
   });
-  // The first of the least, so a tie goes to tree order.
-  const least = (items: UiElement[], score: (item: UiElement) => number) =>
-    items.reduce<UiElement | undefined>((best, item) => (!best || score(item) < score(best) ? item : best), undefined);
+  // The first of the least, so a tie (within 2 points) goes to tree order.
+  const least = (items: UiElement[], score: (item: UiElement) => number) => {
+    const low = Math.min(...items.map(score));
+    return items.find((item) => score(item) <= low + 2 * unit);
+  };
   const pick = (pool: UiElement[]) => {
     const own = pool.find((item) => inside(item.box, a));
     if (own) return own;
@@ -198,7 +220,9 @@ function nearestName(target: UiElement, elements: UiElement[], reach: number): s
       item !== target && item.name && item.role !== 'keyboard' && !(inside(a, item.box) && area(item.box) > area(a)),
   );
   const found =
-    pick(candidates.filter((item) => !item.interactive)) ?? pick(candidates.filter((item) => item.interactive));
+    pick(candidates.filter((item) => item.role === 'text')) ??
+    pick(candidates.filter((item) => !item.interactive && item.role !== 'text')) ??
+    pick(candidates.filter((item) => item.interactive));
   return found?.name.slice(0, 40);
 }
 

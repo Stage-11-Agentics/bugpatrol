@@ -198,6 +198,50 @@ describe('handsetElements with unnamed controls', () => {
     ).toEqual(['play.fill', 'Agree', 'Notifications']);
   });
 
+  it('takes a text before a leading icon, and breaks a near tie of left edges by tree order', () => {
+    const near = (elements: HandsetTree['elements']) =>
+      handsetElements({ ...hum, elements }, 'ios')
+        .filter((element) => !element.name)
+        .map((element) => element.near);
+    expect(
+      near([
+        { type: 'Image', label: 'bell.fill', frame: { x: 20, y: 300, width: 24, height: 24 } },
+        { type: 'StaticText', label: 'Notifications', frame: { x: 56, y: 302, width: 110, height: 20 } },
+        { type: 'Switch', frame: { x: 330, y: 297, width: 51, height: 31 } },
+      ]),
+    ).toEqual(['Notifications']);
+    expect(
+      near([
+        { type: 'StaticText', label: 'NOISE', frame: { x: 18, y: 100, width: 52, height: 16 } },
+        { type: 'StaticText', label: 'blue · +3 dB/oct', frame: { x: 17.5, y: 119, width: 104, height: 13 } },
+        { type: 'Button', frame: { x: 338, y: 104, width: 46, height: 26 } },
+      ]),
+    ).toEqual(['NOISE']);
+  });
+
+  it('reads Android labels as text, so a settings row names its switch by its label', () => {
+    const row = handsetElements(
+      {
+        w: 1080,
+        h: 2400,
+        unit: 'tap',
+        elements: [
+          { type: 'android.widget.TextView', text: 'Sleep timer', frame: { x: 48, y: 800, width: 260, height: 50 } },
+          { type: 'android.widget.TextView', text: '12 min', frame: { x: 640, y: 800, width: 140, height: 50 } },
+          { type: 'android.widget.Switch', frame: { x: 900, y: 790, width: 130, height: 70 } },
+          { type: 'android.widget.EditText', text: 'Rain', frame: { x: 48, y: 1000, width: 980, height: 100 } },
+        ],
+      },
+      'android',
+    );
+    expect(row.map((element) => [element.role, element.name || element.near])).toEqual([
+      ['text', 'Sleep timer'],
+      ['text', '12 min'],
+      ['switch', 'Sleep timer'],
+      ['textbox', 'Rain'],
+    ]);
+  });
+
   it('reaches the next row by a share of the screen, since Android tap units are pixels', () => {
     const android = handsetElements(
       {
@@ -212,6 +256,28 @@ describe('handsetElements with unnamed controls', () => {
       'android',
     );
     expect(android[0]!.near).toBe('Volume');
+  });
+
+  it('keeps an unnamed cell that holds nothing named, such as a swatch in a grid', () => {
+    const grid = handsetElements(
+      {
+        ...hum,
+        elements: [
+          { type: 'CollectionView', frame: { x: 0, y: 100, width: 402, height: 200 } },
+          { type: 'Cell', frame: { x: 20, y: 120, width: 80, height: 80 } },
+          { type: 'Image', frame: { x: 30, y: 130, width: 60, height: 60 } },
+          { type: 'Cell', frame: { x: 110, y: 120, width: 80, height: 80 } },
+          { type: 'android.google.material.tabs.TabLayout', frame: { x: 0, y: 790, width: 402, height: 60 } },
+          { type: 'android.widget.TextView', text: 'Rides', frame: { x: 20, y: 800, width: 100, height: 40 } },
+        ],
+      },
+      'ios',
+    );
+    expect(grid.map((element) => [element.role, element.name, element.box.x])).toEqual([
+      ['button', '', 20],
+      ['button', '', 110],
+      ['text', 'Rides', 20],
+    ]);
   });
 
   it('drops an unnamed table, tab bar or cell: its controls and texts name themselves', () => {
@@ -365,6 +431,26 @@ describe('HandsetDriver', () => {
     };
     expect((await driver.act({ kind: 'tap', ref: 'e1' })).ok).toBe(true);
     expect(calls.at(-1)).toEqual(['tap', '--lease', 'ls_1', '--x', '70', '--y', '310', '--json']);
+  });
+
+  it('does not tap a control through an unnamed scrim drawn over it', async () => {
+    const { calls, exec } = fake({});
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    (driver as unknown as { lastObservation: unknown }).lastObservation = {
+      elements: handsetElements(
+        {
+          ...hum,
+          elements: [
+            { type: 'Button', label: 'Delete', frame: { x: 20, y: 400, width: 362, height: 44 } },
+            { type: 'Button', frame: { x: 0, y: 60, width: 402, height: 560 } },
+          ],
+        },
+        'ios',
+      ),
+    };
+    const result = await driver.act({ kind: 'tap', ref: 'e1' });
+    expect(result.error).toContain('"Delete" is covered by the unnamed button');
+    expect(calls.some((call) => call[0] === 'tap')).toBe(false);
   });
 
   /** Matet's layout editor: a metric card drawn over most of the ADD METRIC button. */
