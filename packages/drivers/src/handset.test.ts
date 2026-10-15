@@ -6,6 +6,7 @@ import {
   type HandsetLogLine,
   type HandsetTree,
   handsetElements,
+  sameLayout,
   swipeDirection,
 } from './handset.js';
 
@@ -136,6 +137,33 @@ describe('appErrors', () => {
   });
 });
 
+describe('sameLayout', () => {
+  const one = (frame: { x: number; y: number; width: number; height: number }, type = 'StaticText'): HandsetTree => ({
+    ...tree,
+    elements: [{ type, label: 'x', frame }],
+  });
+  const at = { x: 100, y: 300, width: 80, height: 20 };
+
+  it('holds while a label ticks, on whichever edge it is aligned by', () => {
+    expect(sameLayout(one(at), one({ ...at, width: 86 }))).toBe(true); // left-aligned
+    expect(sameLayout(one(at), one({ ...at, x: 97, width: 86 }))).toBe(true); // centred
+    expect(sameLayout(one(at), one({ ...at, x: 94, width: 86 }))).toBe(true); // right-aligned
+    expect(sameLayout(one(at, 'Button'), one({ ...at, x: 97, width: 86 }, 'Button'))).toBe(true);
+  });
+
+  it('ignores sub-point jitter', () => {
+    expect(sameLayout(one(at), one({ x: 100.4, y: 300.6, width: 79.7, height: 20.33 }))).toBe(true);
+  });
+
+  it('sees an element slide, move down, resize in height, change type, or appear', () => {
+    expect(sameLayout(one(at), one({ ...at, x: 140 }))).toBe(false);
+    expect(sameLayout(one(at), one({ ...at, y: 310 }))).toBe(false);
+    expect(sameLayout(one(at), one({ ...at, height: 40 }))).toBe(false);
+    expect(sameLayout(one(at), one(at, 'Button'))).toBe(false);
+    expect(sameLayout(one(at), { ...tree, elements: [...one(at).elements, ...one(at).elements] })).toBe(false);
+  });
+});
+
 describe('swipeDirection', () => {
   it('moves the finger against the scroll', () => {
     expect(['up', 'down', 'left', 'right'].map((d) => swipeDirection(d as 'up'))).toEqual([
@@ -201,6 +229,67 @@ describe('HandsetDriver', () => {
     expect(result.retryable).toBe(true);
     expect(result.error).toContain('device, not app');
     expect(result.error).toContain('wait for the flow');
+  });
+
+  /** A tree whose telemetry text ticks on every read, as Matet's HUD does while a wheel streams. */
+  const live = (n: number, dialY = 418): HandsetTree => ({
+    ...tree,
+    elements: [
+      {
+        ref: '@e1',
+        type: 'StaticText',
+        label: `${(23.4 + n / 10).toFixed(1)} km/h`,
+        // Centred text: its width and x follow the digits.
+        frame: { x: 150.33 - (n % 2) * 1.5, y: 317.33, width: 101.33 + (n % 2) * 3, height: 76 },
+      },
+      { ref: '@e2', type: 'Other', value: `${40 + n}%`, frame: { x: 20, y: 120, width: 362.5, height: 80 } },
+      { ref: '@e3', type: 'Button', label: 'Dial', frame: { x: 91, y: dialY, width: 220, height: 68 } },
+    ],
+  });
+
+  function sequence(trees: HandsetTree[]) {
+    let reads = 0;
+    const exec: HandsetExec = async (args) => envelope(args[0]!, trees[Math.min(reads++, trees.length - 1)]);
+    return exec;
+  }
+
+  it('settles when the layout holds, even while text and values tick', async () => {
+    const exec = sequence([0, 1, 2, 3, 4, 5].map((n) => live(n)));
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    expect(await driver.settle({ timeoutMs: 1000, intervalMs: 0 })).toEqual({ frames: 2, stable: true });
+  });
+
+  it("settles while Hum's sleep timer counts down every second", async () => {
+    // A right-aligned countdown beside a fixed button: "10:00" then "9:59" is narrower, so x moves too.
+    const timer = (seconds: number): HandsetTree => {
+      const label = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+      const width = label.length * 11.5;
+      return {
+        ...tree,
+        elements: [
+          { type: 'StaticText', label: `Sleep in ${label}`, frame: { x: 360 - width, y: 140, width, height: 22 } },
+          { type: 'Button', label: 'Stop timer', frame: { x: 20, y: 200, width: 362, height: 50 } },
+        ],
+      };
+    };
+    const exec = sequence([600, 599, 598, 597].map(timer));
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    expect(await driver.settle({ timeoutMs: 1000, intervalMs: 0 })).toEqual({ frames: 2, stable: true });
+  });
+
+  it('waits while an element moves, and settles once it stops', async () => {
+    const exec = sequence([600, 500, 420, 418, 418].map((y, n) => live(n, y)));
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    expect(await driver.settle({ timeoutMs: 1000, intervalMs: 0 })).toEqual({ frames: 5, stable: true });
+  });
+
+  it('gives up at the timeout when the layout never holds', async () => {
+    let n = 0;
+    const exec: HandsetExec = async (args) => envelope(args[0]!, live(n, 400 + n++ * 10));
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    const settled = await driver.settle({ timeoutMs: 50, intervalMs: 0 });
+    expect(settled.stable).toBe(false);
+    expect(settled.frames).toBeGreaterThan(1);
   });
 
   it('says plainly what Handset cannot do yet', async () => {
