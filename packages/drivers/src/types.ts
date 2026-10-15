@@ -104,6 +104,8 @@ export type ActResult = {
   error?: string;
   /** The step to record for replay, with a stable locator in place of the ref. */
   step?: RoutineStep;
+  /** A fact about how the action ran that the explorer should read, such as where a scroll started. */
+  note?: string;
 };
 
 /**

@@ -342,6 +342,7 @@ async function act(session: AgentSession, action: DriverAction, recorded?: Routi
   if (recorded ?? result.step)
     session.trail.push({ ...(recorded ?? result.step)!, at: locationKey(session.lastObservation!) });
   await arriveAtKnownScreen(session, before);
+  if (result.note) viewed.content.unshift({ type: 'text', text: result.note });
   if (replacement) viewed.content.unshift({ type: 'text', text: replacement.message });
   return viewed;
 }
@@ -693,7 +694,8 @@ export function explorerTools(
     },
     {
       name: 'scroll',
-      description: 'Scroll one direction.',
+      description:
+        'Scroll one direction. ref: an element inside the area to scroll, such as a list or a carousel. On iOS and Android the swipe starts on empty space in that area, away from controls; to start it at a point you choose, use drag.',
       inputSchema: schema(
         {
           direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] },

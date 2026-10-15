@@ -745,6 +745,37 @@ describe('explorer, replay, and judge', () => {
     }
   });
 
+  it('shows the explorer where a scroll started when the driver says so', async () => {
+    const f = await fixture();
+    try {
+      const driver = new FakeDriver(f.screens, 'home', 'ios');
+      const act = driver.act.bind(driver);
+      driver.act = async (action) => ({
+        ...(await act(action)),
+        ...(action.kind === 'scroll'
+          ? { note: 'The scroll started on "Ride 3": the area to scroll has no empty space.' }
+          : {}),
+      });
+      const session = new AgentSession(
+        f.root,
+        f.session.config,
+        f.session.vars,
+        f.session.sessionId,
+        'explorer',
+        driver,
+      );
+      const tools = explorerTools(session);
+      expect(tools.find((tool) => tool.name === 'scroll')?.description).toContain('starts on empty space');
+      const scrolled = await run(tools, 'scroll', { direction: 'down' });
+      expect(scrolled.content[0]).toEqual({
+        type: 'text',
+        text: 'The scroll started on "Ride 3": the area to scroll has no empty space.',
+      });
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+
   it('does not offer window switching on iOS', async () => {
     const f = await fixture();
     try {

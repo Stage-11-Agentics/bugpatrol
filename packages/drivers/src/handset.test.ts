@@ -678,6 +678,190 @@ describe('HandsetDriver', () => {
     expect(calls).toHaveLength(sent);
   });
 
+  /**
+   * Hum's eq tab. The band sliders, the notch frequency slider and the beat
+   * slider are drawn shapes with drag gestures: they are in no tree. Only the
+   * test knows where they are.
+   */
+  type Area = { x: number; y: number; width: number; height: number };
+  const text = (label: string, x: number, y: number, width = 60): HandsetTree['elements'][number] => ({
+    type: 'StaticText',
+    label,
+    frame: { x, y, width, height: 13 },
+  });
+  const eq: HandsetTree = {
+    w: 402,
+    h: 874,
+    unit: 'tap',
+    elements: [
+      { type: 'ScrollView', frame: { x: 0, y: 54, width: 402, height: 730 } },
+      text('FIVE BAND', 18, 120, 90),
+      ...[30, 100, 170, 240, 310].map((x) => text('+0.0', x, 150, 40)),
+      ...['60', '230', '910', '3.6k', '14k'].map((label, index) => text(label, 36 + index * 70, 308, 28)),
+      text('NOTCH FILTER', 18, 350, 98),
+      { type: 'Button', frame: { x: 338, y: 344, width: 46, height: 26 } },
+      text('frequency', 18, 390),
+      text('1.2 kHz', 330, 390, 52),
+      text('BINAURAL BEATS', 18, 470, 120),
+      { type: 'Button', frame: { x: 338, y: 464, width: 46, height: 26 } },
+      ...['delta', 'theta', 'alpha', 'beta', 'gamma'].map((label, index) => ({
+        type: 'Button',
+        label,
+        frame: { x: 18 + index * 74, y: 510, width: 66, height: 30 },
+      })),
+      text('beat', 18, 560, 40),
+      text('10 Hz', 340, 560, 42),
+      text('carrier', 18, 630, 50),
+      text('200 Hz', 330, 630, 52),
+      ...['noise', 'eq', 'nature'].map((label, index) => ({
+        type: 'Button',
+        label,
+        frame: { x: index * 134, y: 790, width: 134, height: 50 },
+      })),
+    ],
+  };
+  const eqDrawn: Area[] = [
+    { x: 18, y: 172, width: 366, height: 128 },
+    { x: 18, y: 410, width: 366, height: 24 },
+    { x: 18, y: 580, width: 366, height: 24 },
+    { x: 18, y: 650, width: 366, height: 24 },
+  ];
+  /** Hum's noise tab: the orb knob is drawn in the middle of the screen, in no tree. */
+  const noise: HandsetTree = {
+    ...eq,
+    elements: [
+      { type: 'ScrollView', frame: { x: 0, y: 54, width: 402, height: 730 } },
+      text('NOISE', 18, 100, 52),
+      text('blue · +3 dB/oct', 18, 119, 104),
+      { type: 'Button', frame: { x: 338, y: 104, width: 46, height: 26 } },
+      ...['brown', 'pink', 'white', 'blue', 'violet'].map((label, index) => ({
+        type: 'Button',
+        label,
+        frame: { x: 18 + index * 74, y: 560, width: 66, height: 30 },
+      })),
+      text('modulation', 18, 620, 90),
+      text('rate', 18, 660, 30),
+      text('0.2 Hz', 330, 660, 52),
+      ...eq.elements.slice(-3),
+    ],
+  };
+  const noiseDrawn: Area[] = [
+    { x: 101, y: 337, width: 200, height: 200 },
+    { x: 18, y: 680, width: 366, height: 24 },
+  ];
+
+  /** A driver that has just observed `observed`, with the swipe it sends. */
+  const looking = (observed: HandsetTree) => {
+    const { calls, exec } = fake({});
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    Object.assign(driver as unknown as Record<string, unknown>, {
+      lastTree: observed,
+      lastObservation: {
+        elements: handsetElements(observed, 'ios'),
+        viewport: { width: observed.w, height: observed.h, scale: 3 },
+      },
+    });
+    const swipe = () => {
+      const call = calls.find((args) => args[0] === 'swipe');
+      if (!call) return undefined;
+      const value = (flag: string) => (call.includes(flag) ? Number(call[call.indexOf(flag) + 1]) : undefined);
+      return {
+        direction: call[call.indexOf('--direction') + 1],
+        x: value('--x'),
+        y: value('--y'),
+        distance: value('--distance'),
+      };
+    };
+    return { driver, calls, swipe };
+  };
+  const within = (area: Area, x: number, y: number) =>
+    x >= area.x && x <= area.x + area.width && y >= area.y && y <= area.y + area.height;
+  const onElement = (observed: HandsetTree, x: number, y: number) =>
+    handsetElements(observed, 'ios').some((element) => within(element.box, x, y));
+
+  it("starts a scroll beside a label, not on the EQ band's label it was given, nor on a drawn slider", async () => {
+    const { driver, swipe } = looking(eq);
+    const band = handsetElements(eq, 'ios').find((element) => element.name === '60')!;
+    expect((await driver.act({ kind: 'scroll', direction: 'down', ref: band.ref })).ok).toBe(true);
+    const { direction, x, y, distance } = swipe()!;
+    expect(direction).toBe('up');
+    expect(x).toBeDefined();
+    expect(eqDrawn.some((area) => within(area, x!, y!))).toBe(false);
+    expect(onElement(eq, x!, y!)).toBe(false);
+    // The finger stays inside the scroll view.
+    expect(distance).toBeGreaterThanOrEqual(60);
+    expect(y! - distance!).toBeGreaterThanOrEqual(54);
+  });
+
+  it('starts a scroll with no ref away from the orb knob at the centre of the screen', async () => {
+    const { driver, swipe } = looking(noise);
+    expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
+    const { x, y } = swipe()!;
+    expect(x).toBeDefined();
+    expect(noiseDrawn.some((area) => within(area, x!, y!))).toBe(false);
+    expect(onElement(noise, x!, y!)).toBe(false);
+  });
+
+  it('keeps a scroll off a slider in the tree, and off a point this session dragged', async () => {
+    const slider: HandsetTree = {
+      ...eq,
+      elements: [
+        { type: 'ScrollView', frame: { x: 0, y: 54, width: 402, height: 730 } },
+        text('volume', 18, 600, 60),
+        { type: 'Slider', label: 'Volume', frame: { x: 90, y: 590, width: 290, height: 34 } },
+        text('balance', 18, 700, 60),
+      ],
+    };
+    const { driver, swipe, calls } = looking(slider);
+    expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
+    const first = swipe()!;
+    expect(first.y! < 580 || first.y! > 634 || first.x! < 80).toBe(true);
+    // A drag on the balance row's drawn control: the next scroll stays off it too.
+    expect((await driver.act({ kind: 'drag', from: { x: 200, y: 706 }, direction: 'right', distance: 80 })).ok).toBe(
+      true,
+    );
+    calls.length = 0;
+    expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
+    const second = swipe()!;
+    expect(within({ x: 176, y: 682, width: 128, height: 48 }, second.x!, second.y!)).toBe(false);
+  });
+
+  it('scrolls a list from a row when the list has no empty space, and says so', async () => {
+    const rows: HandsetTree = {
+      ...eq,
+      elements: [
+        { type: 'Table', frame: { x: 0, y: 54, width: 402, height: 736 } },
+        ...Array.from({ length: 16 }, (_, index) => ({
+          type: 'Cell',
+          label: `Ride ${index + 1}`,
+          frame: { x: 0, y: 54 + index * 46, width: 402, height: 46 },
+        })),
+      ],
+    };
+    const { driver, swipe } = looking(rows);
+    const result = await driver.act({ kind: 'scroll', direction: 'down' });
+    expect(result.ok).toBe(true);
+    expect(swipe()!.x).toBeDefined();
+    expect(result.note).toMatch(/^The scroll started on "Ride \d+": the area to scroll has no empty space\.$/);
+  });
+
+  it('refuses a scroll when every point is on a control that follows a drag, and says how to scroll instead', async () => {
+    const sliders: HandsetTree = {
+      ...eq,
+      elements: Array.from({ length: 20 }, (_, index) => ({
+        type: 'Slider',
+        label: `Band ${index + 1}`,
+        frame: { x: 0, y: 54 + index * 40, width: 402, height: 40 },
+      })),
+    };
+    const { driver, calls } = looking(sliders);
+    const result = await driver.act({ kind: 'scroll', direction: 'down' });
+    expect(result).toMatchObject({ ok: false, retryable: false });
+    expect(result.error).toContain('Not scrolled');
+    expect(result.error).toContain('drag');
+    expect(calls.some((call) => call[0] === 'swipe')).toBe(false);
+  });
+
   it('says plainly what Handset cannot do yet', async () => {
     const driver = new HandsetDriver('android', { lease: 'ls_1' }, fake({}).exec);
     expect(await driver.act({ kind: 'back' })).toEqual({
