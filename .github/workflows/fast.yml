@@ -42,7 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The version comes from package.json's packageManager.
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v4
       # knip reads every workspace, the site too, so this job installs it all.
       - run: |
           node --version
@@ -74,7 +74,9 @@ jobs:
       - run: pnpm install --frozen-lockfile --filter '!@bugpatrol/site'
       - id: build
         name: Typecheck and build
-        run: pnpm exec tsc --build
+        run: |
+          ls -la --time-style=full-iso packages/core/dist/tsconfig.tsbuildinfo packages/core/src/index.ts packages/core/tsconfig.json
+          pnpm exec tsc --build --verbose --extendedDiagnostics 2>&1 | grep -E 'is out of date|is up to date|Building project|Check time|Parse time|Total time|Files:|Emit time' | head -80
       - name: Hermetic tests
         timeout-minutes: 1
         run: bash .github/fast/test.sh
