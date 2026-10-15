@@ -36,6 +36,7 @@ concurrency:
 
 env:
   FAST_BUDGET: ${{ github.event_name == 'pull_request' && 60 || 30 }}
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
 
 jobs:
   lint:
@@ -44,23 +45,29 @@ jobs:
     env:
       # knip reads every workspace, the site too, so this job installs it all.
       DEPS: |
+        ~/.cache/node/corepack
         node_modules
         packages/*/node_modules
         examples/*/node_modules
         site/node_modules
     steps:
       - uses: actions/checkout@v7
-      # The version comes from package.json's packageManager. Node is the
-      # image's own: 22 on ubuntu-24.04, pinned because ubuntu-latest moves to
-      # Ubuntu 26. actions/setup-node spent 1-7 s on version checks.
-      - uses: pnpm/action-setup@v5
-      # node_modules itself, for the exact lockfile and package.json files. A
-      # hit skips the install: the registry took 3-8 s, and once 46 s.
+      # node_modules itself and corepack's copy of pnpm, for the exact
+      # lockfile and package.json files. A hit reaches no registry: installs
+      # took 3-8 s and once 46 s, and pnpm/action-setup's download of pnpm
+      # 1-20 s.
       - id: deps
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.DEPS }}
           key: deps-all-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', '**/package.json', '.npmrc') }}
+      # pnpm at package.json's packageManager version. Node is the image's
+      # own: 22 on ubuntu-24.04, pinned because ubuntu-latest moves to Ubuntu
+      # 26. actions/setup-node spent 1-7 s on version checks.
+      - name: pnpm
+        run: |
+          corepack enable --install-directory "$HOME/.local/bin" pnpm
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - id: install
         name: Install
         if: steps.deps.outputs.cache-hit != 'true'
@@ -84,17 +91,21 @@ jobs:
     env:
       # The build and the tests need no site, so it is not installed.
       DEPS: |
+        ~/.cache/node/corepack
         node_modules
         packages/*/node_modules
         examples/*/node_modules
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v5
       - id: deps
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.DEPS }}
           key: deps-nosite-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', '**/package.json', '.npmrc') }}
+      - name: pnpm
+        run: |
+          corepack enable --install-directory "$HOME/.local/bin" pnpm
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # TypeScript's incremental build: each package's dist and its
       # tsconfig.tsbuildinfo, which records every file by a hash of its
       # content, so a stale cache costs time, not a wrong typecheck.
