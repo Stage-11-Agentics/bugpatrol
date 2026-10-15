@@ -41,21 +41,37 @@ jobs:
   lint:
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ github.event_name == 'pull_request' && 2 || 1 }}
+    env:
+      # knip reads every workspace, the site too, so this job installs it all.
+      DEPS: |
+        node_modules
+        packages/*/node_modules
+        examples/*/node_modules
+        site/node_modules
     steps:
       - uses: actions/checkout@v7
-      # The version comes from package.json's packageManager.
+      # The version comes from package.json's packageManager. Node is the
+      # image's own: 22 on ubuntu-24.04, pinned because ubuntu-latest moves to
+      # Ubuntu 26. actions/setup-node spent 1-7 s on version checks.
       - uses: pnpm/action-setup@v5
-      # Node is the runner image's own: 22 on ubuntu-24.04, pinned because
-      # ubuntu-latest moves to Ubuntu 26. actions/setup-node spent 1-7 s on
-      # version checks. No dependency cache: restoring the pnpm store
-      # (228 MB) takes longer than installing from the registry. knip reads
-      # every workspace, the site too, so this job installs it all.
-      - name: Install
-        run: |
-          node --version
-          pnpm install --frozen-lockfile
+      # node_modules itself, for the exact lockfile and package.json files. A
+      # hit skips the install: the registry took 3-8 s, and once 46 s.
+      - id: deps
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.DEPS }}
+          key: deps-all-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', '**/package.json', '.npmrc') }}
+      - id: install
+        name: Install
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: pnpm install --frozen-lockfile
       - run: pnpm check --error-on-warnings
       - run: pnpm knip
+      - if: always() && steps.install.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.DEPS }}
+          key: ${{ steps.deps.outputs.cache-primary-key }}
       - name: Job clock
         if: always()
         env:
@@ -65,9 +81,20 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ github.event_name == 'pull_request' && 2 || 1 }}
+    env:
+      # The build and the tests need no site, so it is not installed.
+      DEPS: |
+        node_modules
+        packages/*/node_modules
+        examples/*/node_modules
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v5
+      - id: deps
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.DEPS }}
+          key: deps-nosite-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', '**/package.json', '.npmrc') }}
       # TypeScript's incremental build: each package's dist and its
       # tsconfig.tsbuildinfo, which records every file by a hash of its
       # content, so a stale cache costs time, not a wrong typecheck.
@@ -79,11 +106,10 @@ jobs:
             packages/*/tsconfig.tsbuildinfo
           key: tsc-${{ runner.os }}-${{ github.sha }}
           restore-keys: tsc-${{ runner.os }}-
-      # The build and the tests need no site, so it is not installed.
-      - name: Install
-        run: |
-          node --version
-          pnpm install --frozen-lockfile --filter '!@bugpatrol/site'
+      - id: install
+        name: Install
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: pnpm install --frozen-lockfile --filter '!@bugpatrol/site'
       - id: build
         name: Typecheck and build
         run: pnpm exec tsc --build
@@ -96,7 +122,13 @@ jobs:
       - name: Hermetic tests
         timeout-minutes: 1
         run: bash .github/fast/test.sh
-      # Saved from main only: a pull request restores main's newest.
+      - if: always() && steps.install.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.DEPS }}
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+      # Saved from main only, as the build changes with every commit: a pull
+      # request restores main's newest.
       - if: always() && github.event_name == 'push' && steps.build.outcome == 'success' && steps.tsc-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
