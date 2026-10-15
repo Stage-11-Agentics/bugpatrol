@@ -66,6 +66,7 @@ jobs:
       # 26. actions/setup-node spent 1-7 s on version checks.
       - name: pnpm
         run: |
+          mkdir -p "$HOME/.local/bin"
           corepack enable --install-directory "$HOME/.local/bin" pnpm
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - id: install
@@ -104,6 +105,7 @@ jobs:
           key: deps-nosite-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', '**/package.json', '.npmrc') }}
       - name: pnpm
         run: |
+          mkdir -p "$HOME/.local/bin"
           corepack enable --install-directory "$HOME/.local/bin" pnpm
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # TypeScript's incremental build: each package's dist and its
