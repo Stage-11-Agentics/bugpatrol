@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 
 /**
@@ -103,6 +103,27 @@ export const paths = {
   sessionSignals: (root: string, id: string) => data(root, 'sessions', recordId(id), 'signals.jsonl'),
   sessionFlow: (root: string, id: string) => data(root, 'sessions', recordId(id), 'flow.json'),
 } as const;
+
+/**
+ * Puts a `.gitignore` of `*` in the run directory, so git, and any tool that
+ * reads nested ignore files the way git does, skips every file there, this
+ * one included. A repo that never ran `bugpatrol init` has no ignore line for
+ * the run directory, and without this a build cache that fingerprints the
+ * app's source sees each session's screenshots as a source change. Never
+ * overwrites the file. Best effort: a read-only checkout must not stop a run.
+ */
+export function ignoreDataDir(root: string): void {
+  const file = data(root, '.gitignore');
+  try {
+    if (existsSync(file)) return;
+    mkdirSync(data(root), { recursive: true });
+    writeFileSync(file, '# Bugpatrol: local data and screenshots of the real app. Never committed.\n*\n', {
+      flag: 'wx',
+    });
+  } catch {
+    // Another process wrote it first, or the folder is not writable.
+  }
+}
 
 /**
  * The project root: the nearest folder at or above `start` that holds

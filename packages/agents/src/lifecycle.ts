@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { resolve } from 'node:path';
-import { type AppCommand, type AppConfig, InfrastructureError } from '@bugpatrol/core';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { type AppCommand, type AppConfig, InfrastructureError, paths } from '@bugpatrol/core';
 import type { Vars } from './vars.js';
 
 type Options = { root: string; vars: Vars; emit?: (summary: string) => void; source?: string };
@@ -11,6 +12,21 @@ export async function startApp(app: AppConfig, opts: Options): Promise<{ vars: V
   const report = (message: string) => opts.emit?.(opts.vars.redact(message) as string);
   const configuredSource = resolve(opts.root, app.source);
   const effectiveSource = opts.source ?? configuredSource;
+  // A fixer's worktree is left alone: the line would land in its diff.
+  if (app.connect.handset && !opts.source) {
+    // Handset's project is the folder `handset run` runs in, so the file goes there.
+    const runsHandset = app.setup.filter((command) => /\bhandset\b/.test(command.run));
+    const folders = new Set(
+      runsHandset.length
+        ? runsHandset.map((command) => resolve(opts.root, opts.vars.resolveConfig(command.cwd ?? '.')))
+        : [configuredSource],
+    );
+    for (const folder of folders) {
+      const added = ignoreForHandset(opts.root, folder);
+      if (added)
+        report(`Added ${added} to ${join(folder, '.handsetignore')}: Bugpatrol's files are not app source. Commit it.`);
+    }
+  }
 
   async function run(command: AppCommand, phase: 'Setup' | 'Teardown'): Promise<void> {
     const shell = opts.vars.resolveConfig(command.run);
@@ -155,5 +171,35 @@ function killGroup(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): voi
     process.kill(-child.pid, signal);
   } catch {
     child.kill(signal);
+  }
+}
+
+/**
+ * Bugpatrol writes into its own folder every session: run data, and also the
+ * app map and the routines, which are committed. Handset fingerprints the
+ * app's source, tracked files included, to decide whether to rebuild, so
+ * each session forced a rebuild. Handset's own `.handsetignore`, at the root
+ * of its project, says what is not source. Adds the folder to it once, when
+ * the folder is inside that project, and returns the line it added.
+ */
+function ignoreForHandset(root: string, source: string): string | undefined {
+  const folder = relative(source, paths.dir(root));
+  if (!folder || folder === '..' || folder.startsWith(`..${sep}`) || isAbsolute(folder)) return undefined;
+  const line = `${folder.split('\\').join('/')}/`;
+  const file = join(source, '.handsetignore');
+  try {
+    const current = existsSync(file) ? readFileSync(file, 'utf8') : '';
+    const bare = line.slice(0, -1);
+    if (current.split('\n').some((each) => [line, bare, `/${line}`, `/${bare}`].includes(each.trim())))
+      return undefined;
+    const separator = current && !current.endsWith('\n') ? '\n' : '';
+    appendFileSync(
+      file,
+      `${separator}# Bugpatrol's own files (config, app map, routines, run data) are not app source.\n${line}\n`,
+    );
+    return line;
+  } catch {
+    // Best effort: a read-only checkout only costs a rebuild.
+    return undefined;
   }
 }

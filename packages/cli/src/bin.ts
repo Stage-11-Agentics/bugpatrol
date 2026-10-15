@@ -1,7 +1,15 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { cleanWorktrees, syncGitHub } from '@bugpatrol/agents';
-import { BugpatrolError, ExitCode, findProjectRoot, loadConfig, moveRoutines } from '@bugpatrol/core';
+import {
+  BugpatrolError,
+  ExitCode,
+  findProjectRoot,
+  ignoreDataDir,
+  loadConfig,
+  moveRoutines,
+  paths,
+} from '@bugpatrol/core';
 import { startDashboard } from '@bugpatrol/dashboard';
 import { configArgs, legacyEnv, withDefaultCommand } from './argv.js';
 import { runAgentCommand } from './commands/agents.js';
@@ -42,6 +50,8 @@ try {
   }
   const moved = moveRoutines(root);
   if (moved) process.stderr.write(`${moved}\n`);
+  // Every command that writes local data (the gate, memory, triage, the fixer) runs in a project.
+  if (existsSync(paths.dir(root))) ignoreDataDir(root);
   switch (command) {
     case '--version':
     case '-v':
