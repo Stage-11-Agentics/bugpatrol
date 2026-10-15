@@ -6,6 +6,7 @@ import type { Locator, Platform } from '@bugpatrol/core';
 import type { ScreenSnapshot } from '@bugpatrol/invariants';
 import { locatorFor, stepFor } from './dom.js';
 import { nativeSnapshot, pruneSystemChrome } from './maestro.js';
+import { tapPoint } from './occlusion.js';
 import type { ActResult, Driver, DriverAction, Observation, UiElement } from './types.js';
 
 /**
@@ -75,6 +76,9 @@ export class HandsetError extends Error {
     this.name = 'HandsetError';
   }
 }
+
+/** The target of a tap is covered: the app did nothing wrong, and nothing was tapped. */
+class HiddenTarget extends Error {}
 
 const defaultExec =
   (bin: string): HandsetExec =>
@@ -291,12 +295,24 @@ export class HandsetDriver implements Driver {
     return element;
   }
 
-  /** Tap the element by its centre, or a recorded locator by id or label, then by point. */
-  private async tapTarget(element?: UiElement, locator?: Locator): Promise<{ degraded: boolean }> {
+  /**
+   * Tap the element where it shows (its centre unless something covers it),
+   * or a recorded locator by id or label, then by point. `point` is set when
+   * the tap was not at the element's centre.
+   */
+  private async tapTarget(
+    element?: UiElement,
+    locator?: Locator,
+  ): Promise<{ degraded: boolean; point?: { x: number; y: number } }> {
     if (element) {
-      const { x, y } = locatorFor(element).point!;
-      await this.call('tap', ['--x', String(x), '--y', String(y)]);
-      return { degraded: false };
+      const at = tapPoint(element, this.lastObservation?.elements ?? [element]);
+      if ('hidden' in at) {
+        throw new HiddenTarget(
+          `Not tapped: ${JSON.stringify(element.name)} is covered by ${JSON.stringify(at.hidden.name)} and does not show. Scroll it into view or close what covers it, then look again.`,
+        );
+      }
+      await this.call('tap', ['--x', String(at.x), '--y', String(at.y)]);
+      return { degraded: false, ...(at.covered ? { point: { x: at.x, y: at.y } } : {}) };
     }
     if (!locator) throw new Error('Tap needs a target');
     for (const label of [locator.testId, locator.name, locator.text]) {
@@ -317,15 +333,16 @@ export class HandsetDriver implements Driver {
     try {
       let element: UiElement | undefined;
       let degraded = false;
+      let point: { x: number; y: number } | undefined;
       switch (action.kind) {
         case 'tap': {
           element = this.element(action);
-          ({ degraded } = await this.tapTarget(element, action.locator));
+          ({ degraded, point } = await this.tapTarget(element, action.locator));
           break;
         }
         case 'type': {
           element = this.element(action);
-          if (element || action.locator) ({ degraded } = await this.tapTarget(element, action.locator));
+          if (element || action.locator) ({ degraded, point } = await this.tapTarget(element, action.locator));
           // Handset has no clear verb yet, so `append: false` on a filled field appends.
           await this.call('type', ['--text', action.value, ...(action.submit ? ['--submit'] : [])]);
           break;
@@ -373,8 +390,12 @@ export class HandsetDriver implements Driver {
           return { ok: false, error: 'Commands require the CLI driver' };
       }
       const fallback = 'locator' in action ? action.locator : undefined;
-      return { ok: true, ...(degraded ? { degraded } : {}), step: stepFor(action, element, fallback) };
+      const step = stepFor(action, element, fallback);
+      // A replay that falls back to the point must tap where this tap landed.
+      if (point && (step.kind === 'tap' || step.kind === 'type') && step.target) step.target.point = point;
+      return { ok: true, ...(degraded ? { degraded } : {}), step };
     } catch (error) {
+      if (error instanceof HiddenTarget) return { ok: false, retryable: false, error: error.message };
       if (error instanceof HandsetError) {
         return { ok: false, retryable: true, error: `device, not app: ${error.message}`.slice(0, 300) };
       }
