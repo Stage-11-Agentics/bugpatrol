@@ -153,19 +153,21 @@ type BugKind = (typeof BUG_KINDS)[number];
  * A reported bug's fingerprint, from facts that hold from one session to the
  * next: the screen (or, on no recorded screen, the location), the kind of
  * bug, and what it is about. That is the element's test id. Else, for a
- * text, the name it follows and its place after that name: a text's words
- * are often the state the bug is about, as Hum's header reads
+ * value (a text with digits, or with no letters), the label it follows and
+ * its place among the values after that label, out of how many: a value's
+ * words are often the state the bug is about, as Hum's header reads
  * "blue · +3 dB/oct" in one session and "brown · -6 dB/oct" in the next. The
- * name it follows is the nearest earlier one with letters and no digits (a
- * header or a label, not a value), so a banner above or a scroll that keeps
- * that name on screen changes nothing, and two texts merge only under the
- * same name in the same place. Else, for a control or an image, its role and
- * the words of its name (numbers and punctuation left out, since live values
- * tick) and, when several share those, its place among them, so "Tab 1" and
- * "Tab 2" stay apart. The frame is left out: it moves with live text,
- * scrolling and the keyboard. Without an element, the replay check; without
- * either, the title. An `other` also keeps its title, so two different bugs
- * never share one for lack of a kind.
+ * label is the nearest earlier text or image with letters and no digits, or
+ * its test id. A value that appears or goes under the same label changes the
+ * count, so the bug splits rather than merges with another. Else, for a
+ * label, a control or an image, its role and the words of its name (numbers
+ * and punctuation left out, since live values tick) and, when several share
+ * those, its place among them, so "Tab 1" and "Tab 2" stay apart. Only the
+ * native drivers list texts; on the web a heading or a label keeps its
+ * words. The frame is left out: it moves with live text, scrolling and the
+ * keyboard. Without an element, the replay check; without either, the title.
+ * An `other` also keeps its title, so two different bugs never share one for
+ * lack of a kind.
  */
 function bugFingerprint(input: {
   screenId?: string;
@@ -188,20 +190,21 @@ function bugFingerprint(input: {
   const named = (item: UiElement) =>
     `${item.role}:${item.name ? words(item.name) : item.near ? `~near ${words(item.near)}` : '~unnamed'}`;
   const twins = element ? input.elements.filter((item) => !item.testId && named(item) === named(element)) : [];
+  const isValue = (item: UiElement) => item.role === 'text' && (/\p{N}/u.test(item.name) || !/\p{L}/u.test(item.name));
   const follows = (item: UiElement) => {
     const before = input.elements.slice(0, input.elements.indexOf(item)).reverse();
-    const anchor = before.find((other) => /\p{L}/u.test(other.name) && !/\d/.test(other.name));
-    return `text after ${anchor ? words(anchor.name) : '~start'}`;
+    const label = before.find((other) => !other.interactive && /\p{L}/u.test(other.name) && !/\p{N}/u.test(other.name));
+    return `value after ${label ? (label.testId ? `id:${label.testId}` : words(label.name)) : '~start'}`;
   };
-  const after =
-    element?.role === 'text'
-      ? input.elements.filter((item) => item.role === 'text' && follows(item) === follows(element))
+  const values =
+    element && isValue(element)
+      ? input.elements.filter((item) => !item.testId && isValue(item) && follows(item) === follows(element))
       : [];
   const subject = element
     ? element.testId
       ? `id:${element.testId}`
-      : element.role === 'text'
-        ? `element:${follows(element)}#${after.indexOf(element)}`
+      : isValue(element)
+        ? `element:${follows(element)}#${values.indexOf(element)}/${values.length}`
         : `element:${named(element)}${twins.length > 1 ? `#${twins.indexOf(element)}` : ''}`
     : Object.keys(bug).length
       ? `check:${exact(bug.shows)}|${exact(bug.lacks)}|${exact(bug.error)}`

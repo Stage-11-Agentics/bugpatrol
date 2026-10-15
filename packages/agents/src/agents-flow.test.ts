@@ -386,8 +386,7 @@ describe('explorer, replay, and judge', () => {
         element: 'e1',
       });
       expect(new Set([session3.fingerprint, knob.fingerprint, title.fingerprint]).size).toBe(3);
-      // A banner above the header changes nothing for the subtitle, and the title, now second on screen,
-      // does not take the subtitle's fingerprint as a place on screen would.
+      // A banner above the header changes nothing for the subtitle or the title, and has its own.
       const banner = async (input: Record<string, unknown>) => {
         const record = await f.workspace.startSession('explorer');
         f.screens.home!.elements = [text('e0', 'Update ready', 60), ...noise('pink · -3 dB/oct')];
@@ -407,8 +406,35 @@ describe('explorer, replay, and judge', () => {
       expect((await banner({ title: 'Slope', what_is_wrong: 'x', element: 'e2' })).fingerprint).toBe(
         session3.fingerprint,
       );
-      const titled = await banner({ title: 'Title is wrong', what_is_wrong: 'x', element: 'e1' });
-      expect(titled.fingerprint).not.toBe(session3.fingerprint);
+      expect((await banner({ title: 'Title', what_is_wrong: 'y', element: 'e1' })).fingerprint).toBe(title.fingerprint);
+      expect((await banner({ title: 'Banner', what_is_wrong: 'z', element: 'e0' })).fingerprint).not.toBe(
+        title.fingerprint,
+      );
+      // A value that goes away under a label splits the next value's bug rather than merging it with the first's.
+      const ride = async (elements: FakeScreen['elements'], ref: string) => {
+        const record = await f.workspace.startSession('explorer');
+        f.screens.home!.elements = elements;
+        const session = new AgentSession(f.root, plain, new Vars(), record.id, 'explorer', f.driver);
+        const tools = explorerTools(session);
+        await run(tools, 'look');
+        await run(tools, 'record_screen', { id: 'hud', name: 'HUD', description: 'The ride' });
+        await run(tools, 'report_bug', {
+          screen_id: 'hud',
+          expected: 'x',
+          severity: 'minor',
+          kind: 'data',
+          title: 'Wrong',
+          what_is_wrong: 'x',
+          element: ref,
+        });
+        return (await f.workspace.readCandidates(record.id)).find((item) => item.source === 'explorer')!;
+      };
+      const distance = await ride(
+        [text('e1', 'RIDE', 100), text('e2', '12.3 km', 120), text('e3', 'Max 30 km/h', 140)],
+        'e2',
+      );
+      const max = await ride([text('e1', 'RIDE', 100), text('e2', 'Max 30 km/h', 140)], 'e2');
+      expect(max.fingerprint).not.toBe(distance.fingerprint);
     } finally {
       await rm(f.root, { recursive: true, force: true });
     }
