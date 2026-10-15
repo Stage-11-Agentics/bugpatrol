@@ -1,8 +1,8 @@
 # Fast: Stage 11's push and pull request tier for this fork.
 #
-# Speed is the point of this workflow. Each job holds a budget on its job
-# clock (from the runner starting the job to its last step; queue time is not
-# counted):
+# Speed is the point of this workflow. Each job holds a budget on GitHub's
+# job clock (from a runner starting the job to its completion; queue time is
+# not counted):
 #
 #   push to main    30 s
 #   pull request    60 s
@@ -13,15 +13,16 @@
 # its clock and warns when it is over.
 #
 # It runs what a clean runner can run in seconds: Biome, knip, the TypeScript
-# build, and the hermetic tests. Tests that need Playwright's Chromium or
-# ffmpeg, slow ones and flaky ones are listed, with the reason, in
-# .github/fast/quarantine.txt. The upstream workflows (ci.yml and the rest)
-# are disabled on this fork with `gh workflow disable`; see CLAUDE.md.
+# build and the hermetic tests. .github/fast/quarantine.txt lists, with the
+# reason, what it leaves out: tests that need Playwright's Chromium or ffmpeg,
+# flaky ones, and the files over 3 s, which run on pull requests only. The
+# upstream workflows (ci.yml and the rest) are disabled on this fork with
+# `gh workflow disable`; see CLAUDE.md.
 name: Fast
 
 on:
   push:
-    branches: [main, ci/fast]
+    branches: [main]
   pull_request:
 
 permissions:

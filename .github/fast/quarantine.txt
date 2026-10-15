@@ -9,7 +9,7 @@
 #   push: <path>    a test file Fast runs on pull requests only
 #   test: <name>    one test Fast skips by its exact name, wherever it is
 
-# Every test in these files launches Playwright's Chromium, which Fast does not install.
+# These launch Playwright's Chromium, which Fast does not install.
 packages/capture/src/font-audit.test.ts    # Chromium
 packages/capture/src/probe.test.ts         # Chromium
 packages/drivers/src/dom.test.ts           # Chromium
@@ -22,7 +22,9 @@ push: packages/agents/src/review.test.ts         # 16 s
 push: packages/agents/src/fixer-patrol.test.ts   # 5.6 s
 push: packages/agents/src/replay.test.ts         # 3.1 s
 
+# In review.test.ts, which pull requests run.
 test: records the replay on both builds, and shows both recordings side by side with the full videos   # ffmpeg
 test: checks status and body on both builds with no model, and shows both HTTP transcripts as terminal recordings   # Chromium
 test: replays the same requests on both builds, and ignores generated ids, times and key order   # Chromium
+# In packages/dashboard/src/agents.test.ts.
 test: picks up .bugpatrol created after start   # flaky: waits a fixed 700 ms for a file watcher
