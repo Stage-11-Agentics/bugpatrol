@@ -170,8 +170,9 @@ function bugFingerprint(input: {
   const exact = (value = '') => value.toLowerCase().replace(/\s+/g, ' ').trim();
   const { element, bug } = input;
   // A control with no name is the one near its nearest name, which holds while other unnamed controls come and go.
+  // `~` never survives words(), so these keys cannot meet a name such as "+" whose words are empty.
   const named = (item: UiElement) =>
-    `${item.role}:${item.name || !item.near ? words(item.name) : `near ${words(item.near)}`}`;
+    `${item.role}:${item.name ? words(item.name) : item.near ? `~near ${words(item.near)}` : '~unnamed'}`;
   const twins = element ? input.elements.filter((item) => !item.testId && named(item) === named(element)) : [];
   const subject = element
     ? element.testId
@@ -218,7 +219,7 @@ function transition(session: AgentSession, to: string): ScreenTransition | undef
               : last.kind === 'press'
                 ? `press ${last.key}`
                 : last.kind === 'type'
-                  ? (last.target?.name ?? 'submit')
+                  ? last.target?.name || last.target?.near || 'submit'
                   : last.kind;
   const via = (session.vars.redact(label) as string).slice(0, 60);
   return { to, kind, via, steps: actions.length, count: 1, lastSeenAt: new Date().toISOString() };
@@ -437,6 +438,7 @@ function locatorSignature(locator?: Locator): string {
   if (!locator) return '';
   if (locator.testId) return `id:${locator.testId}`;
   if (locator.role && locator.name) return `role:${locator.role}:${locator.name}`;
+  if (locator.role && locator.near) return `near:${locator.role}:${locator.near}`;
   if (locator.text) return `text:${locator.text}`;
   if (locator.selector) return `selector:${locator.selector}`;
   return `point:${locator.point?.x},${locator.point?.y}`;

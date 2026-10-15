@@ -998,7 +998,9 @@ function issueStatus(issue, fix) {
 }
 
 function stepWords(step) {
-  const target = step.target?.name || step.target?.text || step.target?.testId || step.target?.selector || 'target';
+  const unnamed = step.target?.near ? `the unnamed ${step.target.role || 'control'} near "${step.target.near}"` : '';
+  const target =
+    step.target?.name || unnamed || step.target?.text || step.target?.testId || step.target?.selector || 'target';
   if (step.kind === 'tap') return `Tap "${target}"`;
   if (step.kind === 'type') return `Type "${step.value}"${step.submit ? ' and submit' : ''}`;
   if (step.kind === 'press') return `Press ${step.key}`;

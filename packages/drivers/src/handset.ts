@@ -6,7 +6,7 @@ import type { Locator, Platform } from '@bugpatrol/core';
 import type { ScreenSnapshot } from '@bugpatrol/invariants';
 import { elementTitle, locatorFor, stepFor } from './dom.js';
 import { nativeSnapshot, pruneSystemChrome } from './maestro.js';
-import { tapPoint } from './occlusion.js';
+import { inside, tapPoint } from './occlusion.js';
 import type { ActResult, Driver, DriverAction, Observation, UiElement } from './types.js';
 
 /**
@@ -94,6 +94,8 @@ const defaultExec =
 const STATUS_BAR = { ios: 54, android: 24 } as const;
 const TEXTBOX = /TextField|SecureTextField|SearchField|TextView|EditText/i;
 const BUTTON = /Button|Cell|Link|Tab|MenuItem|Switch|Toggle|CheckBox|Slider|Picker|ImageButton/i;
+/** Types that hold controls rather than being one. With no name they are dropped; a cell's own texts name it. */
+const HOLDER = /Table|TabBar|TabGroup|Toolbar|NavigationBar|CollectionView|ScrollView|Cell|List|Grid|Group/i;
 
 /** The Handset tree in Bugpatrol's normalised element shape, with system chrome removed. */
 export function handsetElements(tree: HandsetTree, platform: 'ios' | 'android'): UiElement[] {
@@ -117,7 +119,7 @@ export function handsetElements(tree: HandsetTree, platform: 'ios' | 'android'):
             : 'group';
     const interactive = role === 'button' || role === 'textbox' || role === 'switch';
     // A control with no name is still a control: Hum's toggles are buttons with no label.
-    if (!name && !interactive) continue;
+    if (!name && (!interactive || HOLDER.test(type))) continue;
     // iOS reports a static text twice, once by identifier and once by value, on one frame.
     const key = `${node.label ?? name}|${box.x},${box.y},${box.width},${box.height}`;
     if (seen.has(key)) continue;
@@ -137,36 +139,67 @@ export function handsetElements(tree: HandsetTree, platform: 'ios' | 'android'):
     });
   }
   const kept = pruneSystemChrome(elements, { width: tree.w, height: tree.h }, STATUS_BAR[platform]);
+  // Tap units are points on iOS and pixels on Android, so the reach is a share of the screen's width.
+  const reach = tree.w * NEAR_ROW;
   return kept.map((element) => {
-    const near = element.name ? undefined : nearestName(element, kept);
+    const near = element.name ? undefined : nearestName(element, kept, reach);
     return near ? { ...element, near } : element;
   });
 }
 
-/** How far above or below an unnamed control a name may be, in tap units, when its own row has none. */
-const NEAR_ROW = 44;
+/** How far above or below an unnamed control a name may be when its own row has none: 44 points on a 402-point phone. */
+const NEAR_ROW = 0.11;
 
 /**
- * The name nearest an unnamed control, so the explorer can tell it apart from
- * the others: the closest on its own row (a settings row puts its label at
- * the far left and its toggle at the far right), otherwise the closest on the
- * row just above or below. A container that holds the control is around it,
- * not near it.
+ * The name that tells an unnamed control apart. Its own label, drawn inside
+ * it, first. Then its row: the name that starts its part of the row, which is
+ * the leftmost name before it with no other control between them (a settings
+ * row puts its label at the far left, then perhaps a value, then the
+ * toggle); else the nearest name after it (a checkbox before its label).
+ * Then the row just above or below, within `reach`. A text is preferred to
+ * another control's name, which would read as that control. An element that
+ * holds the control is around it, not near it.
  */
-function nearestName(target: UiElement, elements: UiElement[]): string | undefined {
+function nearestName(target: UiElement, elements: UiElement[], reach: number): string | undefined {
   const a = target.box;
-  let best: { name: string; score: number } | undefined;
-  for (const item of elements) {
-    if (!item.name || item.role === 'keyboard') continue;
-    const b = item.box;
-    const holds = b.x <= a.x && b.y <= a.y && b.x + b.width >= a.x + a.width && b.y + b.height >= a.y + a.height;
-    if (holds) continue;
-    const dx = Math.max(0, b.x - (a.x + a.width), a.x - (b.x + b.width));
-    const dy = Math.max(0, b.y - (a.y + a.height), a.y - (b.y + b.height));
-    const score = dy === 0 ? dx : dy <= NEAR_ROW ? 10_000 + dy * 2 + dx : Number.POSITIVE_INFINITY;
-    if (score < (best?.score ?? Number.POSITIVE_INFINITY)) best = { name: item.name, score };
-  }
-  return best?.name.slice(0, 40);
+  const area = (box: UiElement['box']) => box.width * box.height;
+  const sameRow = (b: UiElement['box']) => b.y < a.y + a.height && a.y < b.y + b.height;
+  const rowControls = elements.filter((item) => item !== target && item.interactive && sameRow(item.box));
+  const between = (b: UiElement['box']) => {
+    const [left, right] = b.x + b.width / 2 < a.x ? [b.x + b.width, a.x] : [a.x + a.width, b.x];
+    return rowControls.some((c) => c.box.x >= left - 1 && c.box.x + c.box.width <= right + 1);
+  };
+  const gap = (b: UiElement['box']) => ({
+    dx: Math.max(0, b.x - (a.x + a.width), a.x - (b.x + b.width)),
+    dy: Math.max(0, b.y - (a.y + a.height), a.y - (b.y + b.height)),
+  });
+  // The first of the least, so a tie goes to tree order.
+  const least = (items: UiElement[], score: (item: UiElement) => number) =>
+    items.reduce<UiElement | undefined>((best, item) => (!best || score(item) < score(best) ? item : best), undefined);
+  const pick = (pool: UiElement[]) => {
+    const own = pool.find((item) => inside(item.box, a));
+    if (own) return own;
+    const row = pool.filter((item) => sameRow(item.box) && !between(item.box));
+    const before = row.filter((item) => item.box.x + item.box.width / 2 < a.x);
+    return (
+      least(before, (item) => item.box.x) ??
+      least(
+        row.filter((item) => !before.includes(item)),
+        (item) => gap(item.box).dx,
+      ) ??
+      least(
+        pool.filter((item) => !sameRow(item.box) && gap(item.box).dy <= reach),
+        (item) => gap(item.box).dy * 2 + gap(item.box).dx,
+      )
+    );
+  };
+  const candidates = elements.filter(
+    (item) =>
+      item !== target && item.name && item.role !== 'keyboard' && !(inside(a, item.box) && area(item.box) > area(a)),
+  );
+  const found =
+    pick(candidates.filter((item) => !item.interactive)) ?? pick(candidates.filter((item) => item.interactive));
+  return found?.name.slice(0, 40);
 }
 
 /**

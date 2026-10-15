@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { AGENT_CHECKS, parseConfig, paths } from '@bugpatrol/core';
 import { describe, expect, it } from 'vitest';
 import { replayRoutine } from './replay.js';
+import { stepWords } from './roles/fixer.js';
 import { AgentSession } from './session.js';
 import { FakeDriver, type FakeScreen } from './testing/fake-driver.js';
 import { explorerTools } from './tools/explorer.js';
@@ -382,6 +383,17 @@ describe('explorer, replay, and judge', () => {
         element: 'e2',
       });
       expect(notch.fingerprint).not.toBe(first.fingerprint);
+      // A step on it says which control it was.
+      expect(stepWords(f.session.trail.find((step) => step.kind === 'tap')!)).toBe(
+        'Tap the unnamed button near "BINAURAL BEATS"',
+      );
+      // A name with no letters, such as "+", keeps its fingerprint beside an unnamed control with no name near it.
+      const plus = { ...element('e1', '+'), box: { x: 20, y: 200, width: 40, height: 40 } };
+      f.screens.home!.elements = [plus, { ...element('e2', ''), box: { x: 336, y: 700, width: 46, height: 26 } }];
+      const beside = await report({ title: 'Plus does nothing', what_is_wrong: 'x', kind: 'action', element: 'e1' });
+      f.screens.home!.elements = [plus];
+      const alone = await report({ title: 'Plus does nothing', what_is_wrong: 'x', kind: 'action', element: 'e1' });
+      expect(beside.fingerprint).toBe(alone.fingerprint);
     } finally {
       await rm(f.root, { recursive: true, force: true });
     }

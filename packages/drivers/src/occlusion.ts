@@ -10,7 +10,7 @@ const STEP = 4;
 /** How far a child's frame may overhang its parent's (a badge, a wide label) and still be inside it. */
 const OVERHANG = 4;
 
-const inside = (inner: Box, outer: Box, overhang = OVERHANG) =>
+export const inside = (inner: Box, outer: Box, overhang = OVERHANG) =>
   inner.x >= outer.x - overhang &&
   inner.y >= outer.y - overhang &&
   inner.x + inner.width <= outer.x + outer.width + overhang &&
@@ -24,9 +24,10 @@ export type TapPoint = { x: number; y: number; covered?: UiElement } | { hidden:
 /**
  * Where a tap lands on `target`. Handset's trees list a parent before its
  * children, so an element later in the tree is drawn over the target, except:
- * one that lies inside it (its own label or icon), and a container that is
- * not a control and holds all of it (a scroll view, a background), which is
- * more likely behind than in front. That also lets through a sheet or a scrim
+ * one that lies inside it (its own label or icon), and one that holds all of
+ * it and is not a control (a scroll view, a background) or is a control with
+ * no name (a button drawn over its own label). The first is more likely
+ * behind than in front; the second is the target's own control. That also lets through a sheet or a scrim
  * that is not a control, as the plain centre tap did. The software keyboard
  * always covers.
  * When something covers the centre, the point that shows nearest the centre;
@@ -38,7 +39,9 @@ export function tapPoint(target: UiElement, elements: UiElement[]): TapPoint {
   const after = elements.slice(elements.indexOf(target) + 1);
   const over = after
     .filter(
-      (item) => item.role === 'keyboard' || (!inside(item.box, box) && (item.interactive || !inside(box, item.box, 1))),
+      (item) =>
+        item.role === 'keyboard' ||
+        (!inside(item.box, box) && !(inside(box, item.box, 1) && (!item.interactive || !item.name))),
     )
     .reverse();
   const coveredAt = (x: number, y: number) => over.find((item) => covers(item.box, x, y));

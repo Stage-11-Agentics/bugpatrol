@@ -9,6 +9,7 @@ import {
   fixerAttempts,
   type Issue,
   judgedRetests,
+  type Locator,
   paths,
   type RoutineStep,
 } from '@bugpatrol/core';
@@ -614,10 +615,14 @@ async function attemptsPrompt(
   return `${parts.join('\n\n')}\n`;
 }
 
+/** What a step acted on, in words: its name, or, for a control with none, the name nearest it. */
+function targetWords(target: Locator): string {
+  const unnamed = target.near ? `the unnamed ${target.role ?? 'control'} near "${target.near}"` : '';
+  return target.name || unnamed || target.testId || target.text || target.selector || 'target';
+}
+
 export function stepWords(step: RoutineStep): string {
-  if (step.kind === 'tap') {
-    return `Tap ${step.target.name ?? step.target.testId ?? step.target.text ?? step.target.selector ?? 'target'}`;
-  }
+  if (step.kind === 'tap') return `Tap ${targetWords(step.target)}`;
   if (step.kind === 'type') {
     return `Type ${step.value}${step.submit ? ' and submit' : ''}`;
   }
@@ -625,8 +630,7 @@ export function stepWords(step: RoutineStep): string {
   if (step.kind === 'press') return `Press ${step.key}`;
   if (step.kind === 'open') return `Open ${step.url}`;
   if (step.kind === 'window') return `Switch to window ${step.match}`;
-  if (step.kind === 'upload')
-    return `Upload a sample ${step.file} file to ${step.target.name ?? step.target.testId ?? step.target.text ?? step.target.selector ?? 'target'}`;
+  if (step.kind === 'upload') return `Upload a sample ${step.file} file to ${targetWords(step.target)}`;
   if (step.kind === 'wait') return `Wait ${step.ms} ms`;
   if (step.kind === 'request') return `${step.method} ${step.url}`;
   if (step.kind === 'run')

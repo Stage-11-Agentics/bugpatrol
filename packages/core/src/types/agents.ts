@@ -60,6 +60,8 @@ export type Locator = {
   text?: string;
   /** Web and Electron only. */
   selector?: string;
+  /** A control with no name: the nearest name on screen, so a step can say which control it was. */
+  near?: string;
   point?: { x: number; y: number };
 };
 

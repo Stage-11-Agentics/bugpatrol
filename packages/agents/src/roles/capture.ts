@@ -91,7 +91,7 @@ export async function captureTargets(
             {
               type: 'text',
               text: session.vars.redact(
-                `Replayed issue steps. Elements: ${observation.elements.map((item) => `[${item.ref}] ${item.role} ${item.name}`).join('; ')}`,
+                `Replayed issue steps. Elements: ${observation.elements.map((item) => `[${item.ref}] ${item.role} ${item.name || `(unnamed${item.near ? `, near ${item.near}` : ''})`}`).join('; ')}`,
               ) as string,
             },
           ],
