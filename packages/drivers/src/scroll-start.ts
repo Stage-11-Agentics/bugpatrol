@@ -41,12 +41,13 @@ const CELL = 2;
  * So empty space is not safe. Any empty square of `ROOM` inside the content
  * column may hold a drawn control. The content column runs from the leftmost
  * to the rightmost element, mirrored about the area's centre, since layouts
- * pad both sides alike. Texts, buttons, fields, images and groups that hold
- * nothing else fill it (a React Native or Compose row is one named group); the
- * scroll container does not. A start keeps `REACH` from every such square and
+ * pad both sides alike. Whatever holds no other element fills it, however big:
+ * a text, a button, a field, an image, a carousel's page, a React Native or
+ * Compose row (one named group). A container does not, since its own empty
+ * space may hold a drawn control: its elements fill it instead. A start keeps `REACH` from every such square and
  * every control that follows a drag (`drags`, and an image or group that
- * reports a value, such as Hum's volume knob), `CLEAR` from switches, pickers
- * and the keyboard (`controls`), and stays off the whole row of a place this
+ * reports a value, such as Hum's volume knob), `CLEAR` from switches,
+ * segmented controls and the keyboard (`controls`), and stays off the whole row of a place this
  * session tapped or dragged (`touched`). What is left is a text, a button or a
  * gap too small to draw in, among other elements, or the margin outside the
  * content column. A tree that lists nothing gives no such place.
@@ -66,9 +67,9 @@ export function scrollStart(input: {
   /** The usual travel in tap units, before it is fitted to the region. */
   travel: number;
   elements: UiElement[];
-  /** Controls in the tree that follow a drag of the finger in any direction: sliders, maps. */
+  /** Controls in the tree that follow a drag of the finger: sliders, pickers, maps. */
   drags: Box[];
-  /** Controls in the tree that turn or flick: switches, pickers, segmented controls. */
+  /** Controls in the tree that flick or are tapped: switches, segmented controls. */
   controls: Box[];
   /** Around the places where this session tapped a bare point or began a drag, on this layout. */
   touched: Box[];
@@ -121,7 +122,6 @@ export function scrollStart(input: {
     ...input.controls,
     ...input.elements.filter((element) => element.role === 'keyboard').map((element) => element.box),
   ];
-  // What fills the content column, big or small: a carousel's pages and a hero image count.
   const within = (inner: Box, outer: Box) =>
     inner.x >= outer.x - unit &&
     inner.y >= outer.y - unit &&
@@ -136,10 +136,14 @@ export function scrollStart(input: {
       element.box.y + element.box.height > 0,
   );
   const fills = listed.filter(
-    (element) =>
-      element.role !== 'group' || !listed.some((other) => other !== element && within(other.box, element.box)),
+    (element) => !listed.some((other) => other !== element && within(other.box, element.box)),
   );
-  if (!fills.length)
+  const inArea = (box: Box) =>
+    box.x < region.x + region.width &&
+    region.x < box.x + box.width &&
+    box.y < region.y + region.height &&
+    region.y < box.y + box.height;
+  if (!fills.some((element) => inArea(element.box)))
     return { none: 'the tree lists nothing in the area to scroll, so the app may draw a control anywhere in it' };
   const space = drawable(fills, region, input.screen, input.top, room, cell);
 

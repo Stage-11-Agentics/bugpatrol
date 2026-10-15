@@ -94,12 +94,12 @@ const defaultExec =
 
 const STATUS_BAR = { ios: 54, android: 24 } as const;
 /**
- * Containers a swipe scrolls; controls that follow a drag in any direction, which a scroll keeps a
- * finger's reach from; and controls that turn or flick, which it only keeps off.
+ * Containers a swipe scrolls; controls that follow a drag, which a scroll keeps a finger's reach
+ * from (a picker wheel spins with a vertical drag); and controls that flick, which it only keeps off.
  */
 const SCROLLER = /ScrollView|Table|CollectionView|WebView|RecyclerView|ListView|GridView|ViewPager/i;
-const FOLLOWS = /Slider|Adjustable|SeekBar|RatingBar|MapView|^Map$/i;
-const TURNS = /Switch|Toggle|Picker|SegmentedControl/i;
+const FOLLOWS = /Slider|Picker|Adjustable|SeekBar|RatingBar|MapView|^Map$/i;
+const FLICKS = /Switch|Toggle|SegmentedControl/i;
 /** How far above and below a point this session tapped or dragged a scroll stays, across its whole row, on a 402-point phone. */
 const TOUCHED = 24;
 const TEXTBOX = /TextField|SecureTextField|SearchField|TextView|EditText/i;
@@ -482,7 +482,7 @@ export class HandsetDriver implements Driver {
       travel: this.platform === 'ios' ? 400 * unit : 0.3 * (vertical ? tree.h : tree.w),
       elements: handsetElements(tree, this.platform),
       drags: frames(FOLLOWS),
-      controls: frames(TURNS),
+      controls: frames(FLICKS),
       touched,
       // iOS's status bar, scaled: on Android about 145 px, a little more than its own bar.
       top: STATUS_BAR.ios * unit,

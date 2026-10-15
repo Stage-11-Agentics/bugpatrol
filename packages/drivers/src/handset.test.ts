@@ -1036,7 +1036,7 @@ describe('HandsetDriver', () => {
     expect(clearOf([{ x: 0, y: 606, width: 402, height: 46 }], x, y)).toBe(true);
   });
 
-  it('keeps a scroll off a switch or picker, but not by the reach of a finger, so a form of toggles scrolls', async () => {
+  it('keeps a scroll off a switch, but not by the reach of a finger, so a form of toggles scrolls', async () => {
     // A SwiftUI Form lists each toggle row as a Switch the width of the row.
     const form: HandsetTree = {
       w: 402,
@@ -1082,6 +1082,46 @@ describe('HandsetDriver', () => {
     expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
     const { x, y } = swipe()!;
     expect(clearOf([{ x: 0, y: 601.5, width: 402, height: 44.4 }], x, y)).toBe(true);
+  });
+
+  it('keeps a picker wheel a finger away, since it spins with a vertical drag', async () => {
+    const rows: HandsetTree = {
+      w: 402,
+      h: 874,
+      unit: 'tap',
+      elements: [
+        { type: 'Table', frame: { x: 0, y: 54, width: 402, height: 736 } },
+        ...Array.from({ length: 16 }, (_, index) => ({
+          type: index === 12 ? 'PickerWheel' : 'Cell',
+          label: `Row ${index + 1}`,
+          frame: { x: 0, y: 54 + index * 46, width: 402, height: 46 },
+        })),
+      ],
+    };
+    const { driver, swipe } = looking(rows);
+    expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
+    const { x, y } = swipe()!;
+    expect(clearOf([{ x: 0, y: 606, width: 402, height: 46 }], x, y)).toBe(true);
+  });
+
+  it("keeps a scroll clear of Hum's eq bands when a named table holds the whole screen", async () => {
+    // A container's own empty space can hold a drawn control: only what it holds fills the column.
+    for (const type of ['Table', 'Cell', 'Other']) {
+      const wrapped: HandsetTree = {
+        ...humEq,
+        elements: [
+          { type, label: 'Equalizer', frame: { x: 0, y: 54, width: 402, height: 780 } },
+          { type: 'ScrollView', frame: { x: 0, y: 283, width: 402, height: 402 } },
+          ...humEq.elements,
+        ],
+      };
+      for (const direction of ['up', 'down'] as const) {
+        const { driver, swipe } = looking(wrapped);
+        expect((await driver.act({ kind: 'scroll', direction })).ok).toBe(true);
+        const { x, y } = swipe()!;
+        expect(clearOf(eqDrawn, x, y)).toBe(true);
+      }
+    }
   });
 
   it('scrolls a list of React Native rows, each one named group with nothing inside', async () => {
@@ -1154,6 +1194,20 @@ describe('HandsetDriver', () => {
     }
     const { driver } = looking({ w: 402, h: 874, unit: 'tap', elements: [] });
     expect((await driver.act({ kind: 'scroll', direction: 'down' })).error).toContain('the tree lists nothing');
+    // A web view with nothing listed in it, under a navigation bar that is listed.
+    const web = looking({
+      w: 402,
+      h: 874,
+      unit: 'tap',
+      elements: [
+        { type: 'NavigationBar', frame: { x: 0, y: 54, width: 402, height: 44 } },
+        { type: 'StaticText', label: 'Help', frame: { x: 180, y: 66, width: 42, height: 20 } },
+        { type: 'WebView', frame: { x: 0, y: 98, width: 402, height: 692 } },
+      ],
+    });
+    expect((await web.driver.act({ kind: 'scroll', direction: 'down' })).error).toContain(
+      'the tree lists nothing in the area to scroll',
+    );
   });
 
   it('looks past a named scroll view that covers the area, as Android lists a RecyclerView with an id', async () => {
