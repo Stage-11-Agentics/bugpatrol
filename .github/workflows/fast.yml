@@ -14,29 +14,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
+      - run: command -v node; node --version; ls /opt/hostedtoolcache/node; command -v pnpm || true
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      - run: nproc; df -h . | tail -1; command -v ffmpeg || echo no-ffmpeg; ls ~/.cache/ms-playwright 2>&1 | head -3
       - run: time pnpm install --frozen-lockfile --prefer-offline
-      - run: du -sh node_modules/.pnpm "$(pnpm store path)" || true
       - run: time pnpm exec tsc --build
+      - name: full suite json
+        run: time pnpm exec vitest run --reporter=dot --reporter=json --outputFile=vitest.json
         continue-on-error: true
-      - run: time pnpm check --error-on-warnings
-        continue-on-error: true
-      - run: time pnpm knip
-        continue-on-error: true
-      - run: time pnpm exec vitest run --reporter=default --reporter=json --outputFile=vitest.json
-        continue-on-error: true
-      - name: Per-file durations
+      - name: Per-test durations
         if: always()
         run: |
-          jq -r '.testResults[] | [((.endTime - .startTime)/1000 | tostring), .status, (.name | sub(".*/packages/"; ""))] | @tsv' vitest.json | sort -rn | head -40
-          echo '--- failures'
-          jq -r '.testResults[] | .assertionResults[] | select(.status=="failed") | .ancestorTitles[0] + " > " + .title' vitest.json
-          jq -r '.testResults[] | select(.status=="failed") | .name + ": " + (.message // "")' vitest.json | cut -c1-400
-          echo '--- totals'
-          jq '{numTotalTests, numPassedTests, numFailedTests, numPendingTests, startTime}' vitest.json
+          jq -r '.testResults[] | (.name | sub(".*/packages/"; "")) as $f | .assertionResults[] | [(.duration // 0 | floor | tostring), .status, $f, ((.ancestorTitles | join(" > ")) + " > " + .title)] | @tsv' vitest.json | sort -rn | head -50
+          echo '--- review.test.ts by describe'
+          jq -r '.testResults[] | select(.name | endswith("review.test.ts")) | .assertionResults | group_by(.ancestorTitles[0]) | .[] | [((map(.duration // 0) | add) | floor | tostring), (.[0].ancestorTitles[0]), (length | tostring)] | @tsv' vitest.json | sort -rn
+      - name: hermetic forks
+        run: time pnpm exec vitest run --reporter=dot --exclude 'packages/capture/src/font-audit.test.ts' --exclude 'packages/capture/src/probe.test.ts' --exclude 'packages/drivers/src/dom.test.ts' --exclude 'packages/drivers/src/api.test.ts' --exclude 'packages/drivers/src/recording.test.ts' --exclude 'packages/agents/src/api-replay.test.ts' --exclude 'packages/agents/src/review.test.ts'
+        continue-on-error: true
+      - name: hermetic threads
+        run: time pnpm exec vitest run --reporter=dot --pool=threads --exclude 'packages/capture/src/font-audit.test.ts' --exclude 'packages/capture/src/probe.test.ts' --exclude 'packages/drivers/src/dom.test.ts' --exclude 'packages/drivers/src/api.test.ts' --exclude 'packages/drivers/src/recording.test.ts' --exclude 'packages/agents/src/api-replay.test.ts' --exclude 'packages/agents/src/review.test.ts'
+        continue-on-error: true
+      - name: tsc warm noop
+        run: time pnpm exec tsc --build
