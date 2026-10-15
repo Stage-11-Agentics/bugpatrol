@@ -334,6 +334,8 @@ export class CuaDriver implements Driver {
             throw new Error('HTTP requests require the API driver');
           case 'run':
             throw new Error('Commands require the CLI driver');
+          case 'drag':
+            throw new Error('Drag is supported on iOS and Android through the Handset driver');
         }
         return {
           ok: true,

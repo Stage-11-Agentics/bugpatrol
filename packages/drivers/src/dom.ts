@@ -285,6 +285,8 @@ export function stepFor(action: DriverAction, element?: UiElement, fallback?: St
       };
     case 'scroll':
       return { kind: 'scroll', direction: action.direction, target };
+    case 'drag':
+      return { kind: 'drag', from: action.from, direction: action.direction, distance: action.distance };
     case 'press':
       return { kind: 'press', key: action.key };
     case 'back':

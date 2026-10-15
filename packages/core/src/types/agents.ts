@@ -81,6 +81,8 @@ export type RoutineStep = (
   | { kind: 'type'; target?: Locator; value: string; submit?: boolean; append?: boolean }
   | { kind: 'press'; key: string }
   | { kind: 'scroll'; direction: 'up' | 'down' | 'left' | 'right'; target?: Locator }
+  /** iOS and Android: press at `from` and move the finger `distance` in `direction`, in points. For a drawn slider or knob. */
+  | { kind: 'drag'; from: { x: number; y: number }; direction: 'up' | 'down' | 'left' | 'right'; distance: number }
   | { kind: 'back' }
   | { kind: 'open'; url: string }
   | { kind: 'wait'; ms: number }

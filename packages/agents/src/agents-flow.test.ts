@@ -572,6 +572,52 @@ describe('explorer, replay, and judge', () => {
     }
   });
 
+  it('offers point taps and drags on iOS and Android, in points, and replays a drag', async () => {
+    const f = await fixture();
+    try {
+      for (const platform of ['ios', 'android'] as const) {
+        const phone = new AgentSession(
+          f.root,
+          f.session.config,
+          f.session.vars,
+          f.session.sessionId,
+          'explorer',
+          new FakeDriver(f.screens, 'home', platform),
+        );
+        const names = explorerTools(phone).map((tool) => tool.name);
+        expect(names).toContain('tap_point');
+        expect(names).toContain('drag');
+      }
+      expect(explorerTools(f.session).some((tool) => ['tap_point', 'drag'].includes(tool.name))).toBe(false);
+
+      const driver = new FakeDriver(f.screens, 'home', 'ios');
+      const session = new AgentSession(
+        f.root,
+        f.session.config,
+        f.session.vars,
+        f.session.sessionId,
+        'explorer',
+        driver,
+      );
+      const tools = explorerTools(session);
+      expect(JSON.stringify(await run(tools, 'look'))).toContain('Screen: 100x100 points');
+      await run(tools, 'tap_point', { x: 20, y: 64 });
+      expect(driver.actions.at(-1)).toEqual({ kind: 'tap', locator: { point: { x: 20, y: 64 } } });
+      const dragged = await run(tools, 'drag', { x: 10, y: 60, direction: 'right', distance: 50 });
+      expect(dragged.meta?.summary).toBe('Dragged right 50 points from (10, 60)');
+      const drag = { kind: 'drag', from: { x: 10, y: 60 }, direction: 'right', distance: 50 };
+      expect(driver.actions.at(-1)).toEqual(drag);
+      expect(session.trail.at(-1)).toMatchObject(drag);
+
+      await run(tools, 'save_routine', { id: 'set-volume', description: 'Drag the volume slider' });
+      driver.actions.length = 0;
+      await replayRoutine(session, 'set-volume');
+      expect(driver.actions).toContainEqual(drag);
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+
   it('does not offer window switching on iOS', async () => {
     const f = await fixture();
     try {

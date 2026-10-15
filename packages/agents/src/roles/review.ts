@@ -89,6 +89,7 @@ const REVIEW_TOOLS = new Set([
   'look',
   'tap',
   'tap_point',
+  'drag',
   'type',
   'press',
   'scroll',

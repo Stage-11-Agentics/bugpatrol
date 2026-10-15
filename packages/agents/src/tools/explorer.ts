@@ -83,9 +83,12 @@ function observationText(observation: Observation): string {
     observation.windows
       ?.map((window) => `${window.active ? '*' : ' '} ${window.title} (${window.location})`)
       .join('; ') ?? '(none)';
+  const phone = observation.platform === 'ios' || observation.platform === 'android';
   return [
     `Location: ${observation.location}`,
     `Windows: ${windows}`,
+    // tap_point and drag take points: the screenshot is this size, scaled.
+    ...(phone ? [`Screen: ${observation.viewport.width}x${observation.viewport.height} points`] : []),
     ...errorLines(observation),
     ...(observation.http
       ? [
@@ -279,6 +282,8 @@ function describe(session: AgentSession, action: DriverAction): string {
       return `Pressed ${action.key}`;
     case 'scroll':
       return `Scrolled ${action.direction}`;
+    case 'drag':
+      return `Dragged ${action.direction} ${action.distance} points from (${action.from.x}, ${action.from.y})`;
     case 'back':
       return 'Went back';
     case 'open':
@@ -456,6 +461,7 @@ function stepSignature(step: RoutineStep): string {
   if (step.kind === 'scroll') {
     return `scroll:${locatorSignature(step.target)}:${step.direction}`;
   }
+  if (step.kind === 'drag') return `drag:${step.from.x},${step.from.y}:${step.direction}:${step.distance}`;
   if (step.kind === 'press') return `press:${step.key}`;
   if (step.kind === 'open') return `open:${step.url}`;
   if (step.kind === 'window') return `window:${step.match}`;
@@ -473,19 +479,52 @@ export function explorerTools(
   session: AgentSession,
   opts: { replay?: Parameters<typeof replayRoutine>[2] } = {},
 ): Tool[] {
+  const platform = session.driver?.platform;
+  const phone = platform === 'ios' || platform === 'android';
+  const point = z.object({ x: z.number().finite().nonnegative(), y: z.number().finite().nonnegative() });
   const tools: Tool[] = [
-    ...(session.driver?.platform === 'desktop'
+    ...(platform === 'desktop' || phone
       ? [
           {
             name: 'tap_point',
-            description:
-              'Tap an explicit point in the latest native window screenshot when no semantic ref can reach the control. Coordinates are screenshot pixels. Recorded and replayed as degraded; never a fallback from an ambiguous ref.',
+            description: phone
+              ? 'Tap an explicit point when no ref can reach the control, such as a drawn slider or knob that is not in the element list. Coordinates are points, the unit of the element boxes; the observation gives the screen size in points, and the screenshot shows that screen scaled. Recorded and replayed as degraded; never a fallback from an ambiguous ref.'
+              : 'Tap an explicit point in the latest native window screenshot when no semantic ref can reach the control. Coordinates are screenshot pixels. Recorded and replayed as degraded; never a fallback from an ambiguous ref.',
             inputSchema: schema({ x: { type: 'number', minimum: 0 }, y: { type: 'number', minimum: 0 } }, ['x', 'y']),
             run(input: Record<string, unknown>) {
-              const point = z
-                .object({ x: z.number().finite().nonnegative(), y: z.number().finite().nonnegative() })
+              return act(session, { kind: 'tap', locator: { point: point.parse(input) } });
+            },
+          },
+        ]
+      : []),
+    ...(phone
+      ? [
+          {
+            name: 'drag',
+            description:
+              'Press at a point and move the finger in one direction, for a slider, knob or other control that follows a drag. x, y and distance are points, the unit of the element boxes. direction is where the finger moves: right moves a horizontal slider up. To scroll, use scroll.',
+            inputSchema: schema(
+              {
+                x: { type: 'number', minimum: 0 },
+                y: { type: 'number', minimum: 0 },
+                direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] },
+                distance: { type: 'number', exclusiveMinimum: 0 },
+              },
+              ['x', 'y', 'direction', 'distance'],
+            ),
+            run(input: Record<string, unknown>) {
+              const drag = point
+                .extend({
+                  direction: z.enum(['up', 'down', 'left', 'right']),
+                  distance: z.number().finite().positive(),
+                })
                 .parse(input);
-              return act(session, { kind: 'tap', locator: { point } });
+              return act(session, {
+                kind: 'drag',
+                from: { x: drag.x, y: drag.y },
+                direction: drag.direction,
+                distance: drag.distance,
+              });
             },
           },
         ]

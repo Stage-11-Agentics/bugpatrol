@@ -625,6 +625,53 @@ describe('HandsetDriver', () => {
     expect(settled.frames).toBeGreaterThan(1);
   });
 
+  /** An observation of a 402x874-point screen, the size Handset's tree reports. */
+  const screen = (driver: HandsetDriver) => {
+    (driver as unknown as { lastObservation: unknown }).lastObservation = {
+      elements: handsetElements(hum, 'ios'),
+      viewport: { width: 402, height: 874, scale: 3 },
+    };
+  };
+
+  it("drags from a point in the finger's direction, for a drawn slider that is in no tree", async () => {
+    const { calls, exec } = fake({});
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    screen(driver);
+    const result = await driver.act({ kind: 'drag', from: { x: 40, y: 640 }, direction: 'right', distance: 120 });
+    expect(result.ok).toBe(true);
+    expect(calls.at(-1)).toEqual([
+      'swipe',
+      '--lease',
+      'ls_1',
+      '--direction',
+      'right',
+      '--x',
+      '40',
+      '--y',
+      '640',
+      '--distance',
+      '120',
+      '--json',
+    ]);
+    expect(result.step).toEqual({ kind: 'drag', from: { x: 40, y: 640 }, direction: 'right', distance: 120 });
+  });
+
+  it('taps an explicit point in points, and refuses a point or a drag that leaves the screen', async () => {
+    const { calls, exec } = fake({});
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    screen(driver);
+    expect((await driver.act({ kind: 'tap', locator: { point: { x: 120, y: 640 } } })).ok).toBe(true);
+    expect(calls.at(-1)).toEqual(['tap', '--lease', 'ls_1', '--x', '120', '--y', '640', '--json']);
+    const sent = calls.length;
+    const outside = await driver.act({ kind: 'tap', locator: { point: { x: 1206, y: 640 } } });
+    expect(outside).toMatchObject({ ok: false, retryable: false });
+    expect(outside.error).toContain('outside the 402x874-point screen');
+    const far = await driver.act({ kind: 'drag', from: { x: 300, y: 640 }, direction: 'right', distance: 200 });
+    expect(far).toMatchObject({ ok: false, retryable: false });
+    expect(far.error).toContain('at most 102 points to the right');
+    expect(calls).toHaveLength(sent);
+  });
+
   it('says plainly what Handset cannot do yet', async () => {
     const driver = new HandsetDriver('android', { lease: 'ls_1' }, fake({}).exec);
     expect(await driver.act({ kind: 'back' })).toEqual({

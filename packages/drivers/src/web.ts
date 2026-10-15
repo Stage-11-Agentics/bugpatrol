@@ -280,6 +280,8 @@ export class WebDriver implements Driver {
   async act(action: DriverAction): Promise<ActResult> {
     if (action.kind === 'request') return { ok: false, error: 'HTTP requests require the API driver' };
     if (action.kind === 'run') return { ok: false, error: 'Commands require the CLI driver' };
+    if (action.kind === 'drag')
+      return { ok: false, error: 'Drag is supported on iOS and Android through the Handset driver' };
     try {
       const page = this.activePage();
       let result: TargetResult = { degraded: false };

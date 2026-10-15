@@ -1005,6 +1005,8 @@ function stepWords(step) {
   if (step.kind === 'type') return `Type "${step.value}"${step.submit ? ' and submit' : ''}`;
   if (step.kind === 'press') return `Press ${step.key}`;
   if (step.kind === 'scroll') return `Scroll ${step.direction}`;
+  if (step.kind === 'drag')
+    return `Drag ${step.direction} ${step.distance} points from (${step.from.x}, ${step.from.y})`;
   if (step.kind === 'open') return `Open ${step.url}`;
   if (step.kind === 'wait') return `Wait ${step.ms} ms`;
   if (step.kind === 'window') return `Switch to window "${step.match}"`;
