@@ -21,7 +21,7 @@ name: Fast
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/fast]
   pull_request:
 
 permissions:
@@ -87,8 +87,6 @@ jobs:
       - name: Hermetic tests
         timeout-minutes: 1
         run: bash .github/fast/test.sh
-      - name: x push set
-        run: GITHUB_EVENT_NAME=push bash .github/fast/test.sh
       # Saved from main only: a pull request restores main's newest.
       - if: always() && github.event_name == 'push' && steps.build.outcome == 'success' && steps.tsc-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
