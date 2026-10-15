@@ -42,9 +42,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The version comes from package.json's packageManager.
-      - uses: pnpm/action-setup@v4
-      # knip reads every workspace, the site too, so this job installs it all.
-      - run: |
+      - uses: pnpm/action-setup@v5
+      # Node is the runner image's own (22): actions/setup-node spent 1-7 s
+      # on version checks. No dependency cache: restoring the pnpm store
+      # (228 MB) takes longer than installing from the registry. knip reads
+      # every workspace, the site too, so this job installs it all.
+      - name: Install
+        run: |
           node --version
           pnpm install --frozen-lockfile
       - run: pnpm check --error-on-warnings
@@ -60,7 +64,7 @@ jobs:
     timeout-minutes: ${{ github.event_name == 'pull_request' && 2 || 1 }}
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v5
       # TypeScript's incremental build: each package's dist and its
       # tsconfig.tsbuildinfo, which records every file by a hash of its
       # content, so a stale cache costs time, never correctness.
@@ -72,13 +76,14 @@ jobs:
             packages/*/tsconfig.tsbuildinfo
           key: tsc-${{ runner.os }}-${{ github.sha }}
           restore-keys: tsc-${{ runner.os }}-
-      # The tests and the build need no site, so it is not installed.
-      - run: pnpm install --frozen-lockfile --filter '!@bugpatrol/site'
+      # The build and the tests need no site, so it is not installed.
+      - name: Install
+        run: |
+          node --version
+          pnpm install --frozen-lockfile --filter '!@bugpatrol/site'
       - id: build
         name: Typecheck and build
-        run: |
-          ls -la --time-style=full-iso packages/core/tsconfig.tsbuildinfo packages/core/src/index.ts || true
-          time pnpm exec tsc --build
+        run: pnpm exec tsc --build
       - name: Hermetic tests
         timeout-minutes: 1
         run: bash .github/fast/test.sh
