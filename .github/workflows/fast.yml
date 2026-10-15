@@ -40,16 +40,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: ${{ github.event_name == 'pull_request' && 2 || 1 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # The version comes from package.json's packageManager.
-      - uses: pnpm/action-setup@v4
-      # No dependency cache: restoring the pnpm store (228 MB) takes longer
-      # than installing from the registry.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
+      - uses: pnpm/action-setup@v6
       # knip reads every workspace, the site too, so this job installs it all.
-      - run: pnpm install --frozen-lockfile
+      - run: |
+          node --version
+          pnpm install --frozen-lockfile
       - run: pnpm check --error-on-warnings
       - run: pnpm knip
       - name: Job clock
@@ -62,16 +59,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: ${{ github.event_name == 'pull_request' && 2 || 1 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
       # TypeScript's incremental build: dist and tsconfig.tsbuildinfo, which
       # record each file by a hash of its content, so a stale cache costs
       # time, never correctness.
       - id: tsc-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: packages/*/dist
           key: tsc-${{ runner.os }}-${{ github.sha }}
@@ -85,7 +79,7 @@ jobs:
         timeout-minutes: 1
         run: bash .github/fast/test.sh
       - if: always() && steps.build.outcome == 'success' && steps.tsc-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: packages/*/dist
           key: tsc-${{ runner.os }}-${{ github.sha }}
