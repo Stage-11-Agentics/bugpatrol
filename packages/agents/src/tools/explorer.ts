@@ -143,14 +143,16 @@ type BugKind = (typeof BUG_KINDS)[number];
 
 /**
  * A reported bug's fingerprint, from facts that hold from one session to the
- * next: the screen, the kind of bug, and what it is about. That is the
- * element's test id, or its role and the words of its name (numbers and
- * punctuation left out, since live values tick); without an element, the
- * replay check; without either, the title. The title also goes into an
- * `other`, so that two different bugs never share a fingerprint for lack of a kind.
+ * next: the screen (or, on no recorded screen, the location), the kind of
+ * bug, and what it is about. That is the element's test id, or its role, the
+ * words of its name (numbers and punctuation left out, since live values
+ * tick) and where it is, so "Tab 1" and "Tab 2" stay apart; without an
+ * element, the replay check; without either, the title. An `other` also
+ * keeps its title, so two different bugs never share one for lack of a kind.
  */
 function bugFingerprint(input: {
   screenId?: string;
+  location: string;
   kind: BugKind;
   element?: UiElement;
   bug: BugCheck;
@@ -161,19 +163,20 @@ function bugFingerprint(input: {
       .toLowerCase()
       .replace(/[^\p{L}]+/gu, ' ')
       .trim();
+  const exact = (value = '') => value.toLowerCase().replace(/\s+/g, ' ').trim();
   const { element, bug } = input;
-  const named = element && (element.testId ? `id:${element.testId}` : words(element.name));
   const subject = element
-    ? `element:${element.testId ? named : `${element.role}:${named}`}`
+    ? element.testId
+      ? `id:${element.testId}`
+      : `element:${element.role}:${words(element.name)}`
     : Object.keys(bug).length
-      ? `check:${(['shows', 'lacks', 'error'] as const).map((key) => words(bug[key] ?? '')).join('|')}`
-      : `title:${words(input.title)}`;
+      ? `check:${exact(bug.shows)}|${exact(bug.lacks)}|${exact(bug.error)}`
+      : `title:${exact(input.title)}`;
   return fingerprint({
-    screenId: input.screenId ?? 'unknown',
+    screenId: input.screenId ?? `unrecorded:${input.location}`,
     ruleId: `explorer:${input.kind}`,
-    // An element with no words in its name, such as a bare number, is known by where it is.
-    ...(element && !named ? { regions: [element.box] } : {}),
-    domNodeSignature: input.kind === 'other' && element ? `${subject}|title:${words(input.title)}` : subject,
+    ...(element && !element.testId ? { regions: [element.box] } : {}),
+    domNodeSignature: input.kind === 'other' && element ? `${subject}|title:${exact(input.title)}` : subject,
   });
 }
 
@@ -819,7 +822,7 @@ export function explorerTools(
           sessionId: session.sessionId,
           screenId,
           source: 'explorer',
-          fingerprint: bugFingerprint({ screenId, kind, element, bug, title }),
+          fingerprint: bugFingerprint({ screenId, location: screenKey(observation), kind, element, bug, title }),
           summary: session.vars.redact(title) as string,
           detail: session.vars.redact(`${arg(input, 'what_is_wrong')}\nExpected: ${arg(input, 'expected')}`) as string,
           severity: input.severity as Candidate['severity'],
@@ -833,13 +836,19 @@ export function explorerTools(
           createdAt: new Date().toISOString(),
         };
         const decided = (await session.workspace.readTriage()).fingerprints[candidate.fingerprint];
+        // A match is by screen, kind and element, not by words: a different bug there gets a way out.
+        const different = kind === 'other' ? '' : ' If yours is a different bug, report it again with kind "other".';
         if (decided?.decision === 'dismissed')
-          return text(`Not reported: the QA lead dismissed this before (${decided.reason}). Continue.${fallback}`);
+          return text(
+            `Not reported: the QA lead dismissed this before (${decided.reason}).${different} Continue.${fallback}`,
+          );
         if (decided?.decision === 'filed' && decided.issueId) {
           const issue = await session.workspace.readIssue(decided.issueId);
           if (issue && issue.status !== 'fixed' && issue.status !== 'dismissed') {
             await addOccurrence(session, issue.id);
-            return text(`Already filed as ${issue.id}; counted one more occurrence.${fallback}`);
+            return text(
+              `Already filed as ${issue.id} (${JSON.stringify(issue.title)}); counted one more occurrence.${different}${fallback}`,
+            );
           }
         }
         await session.workspace.appendCandidate(session.sessionId, candidate);
