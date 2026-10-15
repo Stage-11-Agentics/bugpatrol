@@ -753,7 +753,7 @@ describe('explorer, replay, and judge', () => {
       driver.act = async (action) => ({
         ...(await act(action)),
         ...(action.kind === 'scroll'
-          ? { note: 'The scroll started on "Ride 3": the area to scroll has no empty space.' }
+          ? { note: 'The scroll started on "Ride 3": nothing else in the area to scroll is clear of controls.' }
           : {}),
       });
       const session = new AgentSession(
@@ -765,11 +765,13 @@ describe('explorer, replay, and judge', () => {
         driver,
       );
       const tools = explorerTools(session);
-      expect(tools.find((tool) => tool.name === 'scroll')?.description).toContain('starts on empty space');
+      expect(tools.find((tool) => tool.name === 'scroll')?.description).toContain(
+        'clear of sliders and of empty space',
+      );
       const scrolled = await run(tools, 'scroll', { direction: 'down' });
       expect(scrolled.content[0]).toEqual({
         type: 'text',
-        text: 'The scroll started on "Ride 3": the area to scroll has no empty space.',
+        text: 'The scroll started on "Ride 3": nothing else in the area to scroll is clear of controls.',
       });
     } finally {
       await rm(f.root, { recursive: true, force: true });
