@@ -200,6 +200,55 @@ describe('HandsetDriver', () => {
     expect(result.step).toMatchObject({ kind: 'tap', target: { testId: 'dial-button' } });
   });
 
+  /** Matet's layout editor: a metric card drawn over most of the ADD METRIC button. */
+  const editor = (card: { y: number; height: number }): HandsetTree => ({
+    ...tree,
+    elements: [
+      { ref: '@e1', type: 'Button', label: 'ADD METRIC', frame: { x: 20, y: 600, width: 362, height: 60 } },
+      { ref: '@e2', type: 'StaticText', label: 'ADD METRIC', frame: { x: 150, y: 620, width: 102, height: 20 } },
+      { ref: '@e3', type: 'Button', label: 'SPEED', frame: { x: 20, y: card.y, width: 362, height: card.height } },
+    ],
+  });
+  const observed = (driver: HandsetDriver, observedTree: HandsetTree) => {
+    (driver as unknown as { lastObservation: unknown }).lastObservation = {
+      elements: handsetElements(observedTree, 'ios'),
+    };
+  };
+
+  it('taps through a label inside the element at its centre', async () => {
+    const { calls, exec } = fake({});
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    observed(driver, editor({ y: 700, height: 80 }));
+    expect((await driver.act({ kind: 'tap', ref: 'e1' })).ok).toBe(true);
+    expect(calls.at(-1)).toEqual(['tap', '--lease', 'ls_1', '--x', '201', '--y', '630', '--json']);
+  });
+
+  it('taps the part that shows when another element covers the centre, and records that point', async () => {
+    const { calls, exec } = fake({});
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    observed(driver, editor({ y: 560, height: 80 }));
+    const result = await driver.act({ kind: 'tap', ref: 'e1' });
+    expect(result.ok).toBe(true);
+    const tap = calls.at(-1)!;
+    const [x, y] = [Number(tap[tap.indexOf('--x') + 1]), Number(tap[tap.indexOf('--y') + 1])];
+    // The card ends at y 640; the button shows from there to 660.
+    expect(x).toBe(201);
+    expect(y).toBeGreaterThan(640);
+    expect(y).toBeLessThan(660);
+    expect(result.step).toMatchObject({ kind: 'tap', target: { name: 'ADD METRIC', point: { x, y } } });
+  });
+
+  it('refuses to tap an element that is hidden, and says what covers it', async () => {
+    const { calls, exec } = fake({});
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    observed(driver, editor({ y: 590, height: 80 }));
+    const result = await driver.act({ kind: 'tap', ref: 'e1' });
+    expect(result.ok).toBe(false);
+    expect(result.retryable).toBeUndefined();
+    expect(result.error).toContain('"ADD METRIC" is covered by "SPEED"');
+    expect(calls.some((call) => call[0] === 'tap')).toBe(false);
+  });
+
   it('replays a recorded locator by id before falling back to the point', async () => {
     const { calls, exec } = fake({
       'tap:dial-button': envelope('tap', null, { code: 'not_found', message: 'no element', lesson: null }),
