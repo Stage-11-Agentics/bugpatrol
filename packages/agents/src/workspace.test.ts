@@ -15,7 +15,8 @@ describe('Workspace', () => {
       await writeFile(join(root, 'App.swift'), 'struct App {}\n');
       const workspace = new Workspace(root);
       const session = await workspace.startSession('explorer');
-      await workspace.saveScreenshot(session.id, Buffer.from('png'), 'home');
+      const shot = await workspace.saveScreenshot(session.id, Buffer.from('png'), 'home');
+      expect(await readFile(join(root, shot), 'utf8')).toBe('png');
       await workspace.upsertLessons([{ role: 'explorer', source: 'agent', text: 'The HUD streams live numbers.' }]);
       // A build cache that fingerprints the source lists files the way git does.
       const source = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {

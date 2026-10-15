@@ -110,19 +110,18 @@ export const paths = {
  * one included. A repo that never ran `bugpatrol init` has no ignore line for
  * the run directory, and without this a build cache that fingerprints the
  * app's source sees each session's screenshots as a source change. Never
- * overwrites the file.
+ * overwrites the file. Best effort: a read-only checkout must not stop a run.
  */
 export function ignoreDataDir(root: string): void {
   const file = data(root, '.gitignore');
-  if (existsSync(file)) return;
-  mkdirSync(data(root), { recursive: true });
   try {
+    if (existsSync(file)) return;
+    mkdirSync(data(root), { recursive: true });
     writeFileSync(file, '# Bugpatrol: local data and screenshots of the real app. Never committed.\n*\n', {
       flag: 'wx',
     });
-  } catch (error) {
-    // Another session wrote it first.
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  } catch {
+    // Another process wrote it first, or the folder is not writable.
   }
 }
 

@@ -1,9 +1,10 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from './config/load.js';
-import { findProjectRoot, instructionsPath, legacyLayout, moveRoutines, paths } from './paths.js';
+import { findProjectRoot, ignoreDataDir, instructionsPath, legacyLayout, moveRoutines, paths } from './paths.js';
 
 function project(): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'bugpatrol-paths-')));
@@ -13,6 +14,18 @@ function project(): string {
 }
 
 describe('paths', () => {
+  it('git-ignores everything in the run directory, its own ignore file included, and never overwrites it', () => {
+    const root = project();
+    execFileSync('git', ['init', '-q', root]);
+    ignoreDataDir(root);
+    writeFileSync(join(paths.data(root), 'memory.json'), '{}');
+    const listed = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: root, encoding: 'utf8' });
+    expect(listed.trim()).toBe('.bugpatrol/bugpatrol.yml');
+    writeFileSync(join(paths.data(root), '.gitignore'), '# mine\n*\n');
+    ignoreDataDir(root);
+    expect(readFileSync(join(paths.data(root), '.gitignore'), 'utf8')).toBe('# mine\n*\n');
+  });
+
   it('keeps the config in .bugpatrol/ and all local data in .bugpatrol/runs/', () => {
     const root = '/repo';
     expect(paths.config(root)).toBe('/repo/.bugpatrol/bugpatrol.yml');
