@@ -252,6 +252,67 @@ describe('explorer, replay, and judge', () => {
     }
   });
 
+  it('gives the same bug the same fingerprint in a later session, however it is worded', async () => {
+    const plain = parseConfig({ version: 1, app: { connect: { url: 'fake://home' } } });
+    const f = await fixture({ config: plain });
+    try {
+      f.screens.home!.elements = [
+        { ...element('e1', 'MAX SPD --'), role: 'text', interactive: false },
+        { ...element('e2', 'Range 12 km'), role: 'text', interactive: false },
+      ];
+      const report = async (session: AgentSession, input: Record<string, unknown>) => {
+        const tools = explorerTools(session);
+        await run(tools, 'look');
+        await run(tools, 'record_screen', { id: 'hud', name: 'HUD', description: 'The live ride' });
+        await run(tools, 'report_bug', { screen_id: 'hud', expected: 'A value', severity: 'major', ...input });
+        return (await f.workspace.readCandidates(session.sessionId)).find((item) => item.source === 'explorer')!;
+      };
+      const first = await report(f.session, {
+        title: 'MAX SPD card never fills while riding',
+        what_is_wrong: 'The card shows -- the whole ride.',
+        kind: 'data',
+        element: 'e1',
+      });
+      const later = async (name: string, input: Record<string, unknown>) => {
+        f.screens.home!.elements[1]!.name = name;
+        const record = await f.workspace.startSession('explorer');
+        return report(new AgentSession(f.root, plain, new Vars(), record.id, 'explorer', f.driver), input);
+      };
+      const again = await later('Range 12 km', {
+        title: 'HUD max speed stays empty',
+        what_is_wrong: 'Max speed is blank during a ride.',
+        kind: 'data',
+        element: 'e1',
+      });
+      expect(again.fingerprint).toBe(first.fingerprint);
+      // A ticking number in the element's name is the same element.
+      const range = await later('Range 12 km', {
+        title: 'Range is wrong',
+        what_is_wrong: 'x',
+        kind: 'data',
+        element: 'e2',
+      });
+      const ticked = await later('Range 13 km', {
+        title: 'Bad range',
+        what_is_wrong: 'y',
+        kind: 'data',
+        element: 'e2',
+      });
+      expect(ticked.fingerprint).toBe(range.fingerprint);
+      // Another element, or another kind of bug on the same element, is another bug.
+      expect(range.fingerprint).not.toBe(first.fingerprint);
+      const clipped = await later('Range 12 km', {
+        title: 'MAX SPD is cut off',
+        what_is_wrong: 'z',
+        kind: 'display',
+        element: 'e1',
+      });
+      expect(clipped.fingerprint).not.toBe(first.fingerprint);
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+
   it("saves a new issue's repro as a committed routine", async () => {
     const f = await fixture();
     try {
