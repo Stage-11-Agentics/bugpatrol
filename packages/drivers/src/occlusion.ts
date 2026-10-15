@@ -7,11 +7,14 @@ const MARGIN = 2;
 /** The spacing of the points tried when the centre is covered. */
 const STEP = 4;
 
+/** How far a child's frame may overhang its parent's (a badge, a wide label) and still be inside it. */
+const OVERHANG = 4;
+
 const inside = (inner: Box, outer: Box) =>
-  inner.x >= outer.x - 1 &&
-  inner.y >= outer.y - 1 &&
-  inner.x + inner.width <= outer.x + outer.width + 1 &&
-  inner.y + inner.height <= outer.y + outer.height + 1;
+  inner.x >= outer.x - OVERHANG &&
+  inner.y >= outer.y - OVERHANG &&
+  inner.x + inner.width <= outer.x + outer.width + OVERHANG &&
+  inner.y + inner.height <= outer.y + outer.height + OVERHANG;
 
 const covers = (box: Box, x: number, y: number) =>
   x >= box.x - MARGIN && x <= box.x + box.width + MARGIN && y >= box.y - MARGIN && y <= box.y + box.height + MARGIN;
@@ -19,16 +22,23 @@ const covers = (box: Box, x: number, y: number) =>
 export type TapPoint = { x: number; y: number; covered?: UiElement } | { hidden: UiElement };
 
 /**
- * Where a tap lands on `target`. An element later in the tree is drawn over
- * it, unless it lies inside the target (its own label or icon). When one
- * covers the centre, the point that shows nearest the centre; when none
- * shows, `hidden` names what covers it, so the tap goes to neither element.
+ * Where a tap lands on `target`. Handset's trees list a parent before its
+ * children, so an element later in the tree is drawn over the target, except:
+ * one that lies inside it (its own label or icon), and a container that is
+ * not a control and holds all of it (a scroll view, a background), which is
+ * more likely behind than in front. The software keyboard always covers.
+ * When something covers the centre, the point that shows nearest the centre;
+ * when none shows, `hidden` names the topmost cover, and nothing is tapped.
  */
 export function tapPoint(target: UiElement, elements: UiElement[]): TapPoint {
   const box = target.box;
   const centre = { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) };
   const after = elements.slice(elements.indexOf(target) + 1);
-  const over = after.filter((item) => !inside(item.box, box));
+  const over = after
+    .filter(
+      (item) => !inside(item.box, box) && (item.role === 'keyboard' || item.interactive || !inside(box, item.box)),
+    )
+    .reverse();
   const coveredAt = (x: number, y: number) => over.find((item) => covers(item.box, x, y));
   const covered = coveredAt(centre.x, centre.y);
   if (!covered) return centre;

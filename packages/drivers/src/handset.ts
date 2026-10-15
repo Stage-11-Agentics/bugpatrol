@@ -395,7 +395,7 @@ export class HandsetDriver implements Driver {
       if (point && (step.kind === 'tap' || step.kind === 'type') && step.target) step.target.point = point;
       return { ok: true, ...(degraded ? { degraded } : {}), step };
     } catch (error) {
-      if (error instanceof HiddenTarget) return { ok: false, error: error.message };
+      if (error instanceof HiddenTarget) return { ok: false, retryable: false, error: error.message };
       if (error instanceof HandsetError) {
         return { ok: false, retryable: true, error: `device, not app: ${error.message}`.slice(0, 300) };
       }

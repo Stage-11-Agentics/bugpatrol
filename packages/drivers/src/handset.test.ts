@@ -244,9 +244,40 @@ describe('HandsetDriver', () => {
     observed(driver, editor({ y: 590, height: 80 }));
     const result = await driver.act({ kind: 'tap', ref: 'e1' });
     expect(result.ok).toBe(false);
-    expect(result.retryable).toBeUndefined();
+    expect(result.retryable).toBe(false);
     expect(result.error).toContain('"ADD METRIC" is covered by "SPEED"');
     expect(calls.some((call) => call[0] === 'tap')).toBe(false);
+  });
+
+  it('taps the centre when a later container that is not a control holds the element', async () => {
+    const { calls, exec } = fake({});
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    const editorTree = editor({ y: 700, height: 80 });
+    editorTree.elements.push({
+      type: 'ScrollView',
+      id: 'layout-list',
+      frame: { x: 0, y: 80, width: 402, height: 700 },
+    });
+    observed(driver, editorTree);
+    expect((await driver.act({ kind: 'tap', ref: 'e1' })).ok).toBe(true);
+    expect(calls.at(-1)).toEqual(['tap', '--lease', 'ls_1', '--x', '201', '--y', '630', '--json']);
+  });
+
+  it('does not type into a field under the software keyboard', async () => {
+    const keys = 'qwertyuiopasdfghjklzxcvbnm'.split('').map((key, index) => ({
+      type: 'Button',
+      label: key,
+      frame: { x: (index % 10) * 40, y: 600 + Math.floor(index / 10) * 50, width: 38, height: 46 },
+    }));
+    const { calls, exec } = fake({});
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    observed(driver, {
+      ...tree,
+      elements: [{ type: 'TextField', label: 'Wheel name', frame: { x: 20, y: 650, width: 362, height: 40 } }, ...keys],
+    });
+    const result = await driver.act({ kind: 'type', ref: 'e1', value: 'Zippy' });
+    expect(result.error).toContain('"Wheel name" is covered by "Software keyboard (open)"');
+    expect(calls).toEqual([]);
   });
 
   it('replays a recorded locator by id before falling back to the point', async () => {
