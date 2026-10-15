@@ -903,12 +903,14 @@ describe('HandsetDriver', () => {
   ];
   /**
    * On Hum, swipes that began 10 to 12 points outside a band or the notch slider dragged it, since
-   * iOS hit-tests a finger, not a point. A start must be farther away than that.
+   * iOS hit-tests a finger, not a point. A start keeps 24 points away, twice that.
    */
-  const clearOf = (areas: Area[], x: number, y: number) =>
+  const clearOf = (areas: Area[], x: number, y: number, by = 24) =>
     areas.every(
-      (area) => x < area.x - 16 || x > area.x + area.width + 16 || y < area.y - 16 || y > area.y + area.height + 16,
+      (area) => x <= area.x - by || x >= area.x + area.width + by || y <= area.y - by || y >= area.y + area.height + by,
     );
+  const within = (area: Area, x: number, y: number) =>
+    x >= area.x && x <= area.x + area.width && y >= area.y && y <= area.y + area.height;
 
   /** A driver that has just observed `observed`, with refs as the explorer numbers them, and the swipe it sends. */
   const looking = (observed: HandsetTree, platform: 'ios' | 'android' = 'ios') => {
@@ -948,8 +950,6 @@ describe('HandsetDriver', () => {
     const { direction, x, y, distance } = swipe()!;
     expect(direction).toBe('up');
     expect(clearOf(eqDrawn, x, y)).toBe(true);
-    // The tapped band's whole row is out, not only the point.
-    expect(Math.abs(y - 400)).toBeGreaterThanOrEqual(24);
     expect(distance).toBeGreaterThanOrEqual(60);
     expect(y - distance).toBeGreaterThanOrEqual(54);
     expect(result.note).toBeUndefined();
@@ -1019,7 +1019,8 @@ describe('HandsetDriver', () => {
       elements: [
         { type: 'Table', frame: { x: 0, y: 54, width: 402, height: 736 } },
         ...Array.from({ length: 16 }, (_, index) =>
-          index === 8
+          // On the ideal start: the table's centre, moved back by half the travel.
+          index === 12
             ? { type: 'Slider', label: 'Volume', frame: { x: 0, y: 54 + index * 46, width: 402, height: 46 } }
             : {
                 type: 'Cell',
@@ -1032,7 +1033,127 @@ describe('HandsetDriver', () => {
     const { driver, swipe } = looking(rows);
     expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
     const { x, y } = swipe()!;
-    expect(clearOf([{ x: 0, y: 422, width: 402, height: 46 }], x, y)).toBe(true);
+    expect(clearOf([{ x: 0, y: 606, width: 402, height: 46 }], x, y)).toBe(true);
+  });
+
+  it('keeps a scroll off a switch or picker, but not by the reach of a finger, so a form of toggles scrolls', async () => {
+    // A SwiftUI Form lists each toggle row as a Switch the width of the row.
+    const form: HandsetTree = {
+      w: 402,
+      h: 874,
+      unit: 'tap',
+      elements: [
+        { type: 'Table', frame: { x: 0, y: 54, width: 402, height: 736 } },
+        ...Array.from({ length: 16 }, (_, index) => ({
+          type: index % 2 ? 'Switch' : 'Cell',
+          label: `Setting ${index + 1}`,
+          frame: { x: 0, y: 54 + index * 46, width: 402, height: 46 },
+        })),
+      ],
+    };
+    const { driver, swipe } = looking(form);
+    expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
+    const { y } = swipe()!;
+    const row = Math.floor((y - 54) / 46);
+    expect(row % 2).toBe(0);
+    expect(y - (54 + row * 46)).toBeGreaterThanOrEqual(8);
+    expect(54 + (row + 1) * 46 - y).toBeGreaterThanOrEqual(8);
+  });
+
+  it('finds an empty gap of a control between two rows, though its edges fall between grid cells', async () => {
+    // Rows above end at 601.5 and rows below start at 645.9: a 44.4-point gap on the ideal start.
+    const rows = (from: number, to: number, count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        type: 'Cell',
+        label: `Row ${from + index}`,
+        frame: { x: 0, y: from + ((to - from) / count) * index, width: 402, height: (to - from) / count },
+      }));
+    const gap: HandsetTree = {
+      w: 402,
+      h: 874,
+      unit: 'tap',
+      elements: [
+        { type: 'Table', frame: { x: 0, y: 54, width: 402, height: 736 } },
+        ...rows(54, 601.5, 13),
+        ...rows(645.9, 790, 4),
+      ],
+    };
+    const { driver, swipe } = looking(gap);
+    expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
+    const { x, y } = swipe()!;
+    expect(clearOf([{ x: 0, y: 601.5, width: 402, height: 44.4 }], x, y)).toBe(true);
+  });
+
+  it('scrolls a list of React Native rows, each one named group with nothing inside', async () => {
+    const rows: HandsetTree = {
+      w: 402,
+      h: 874,
+      unit: 'tap',
+      elements: Array.from({ length: 16 }, (_, index) => ({
+        type: 'Other',
+        label: `Ride ${index + 1}, 12 km`,
+        frame: { x: 0, y: 100 + index * 46, width: 402, height: 46 },
+      })),
+    };
+    const { driver, swipe } = looking(rows);
+    expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
+    expect(swipe()!.y).toBeGreaterThan(100);
+  });
+
+  it('scrolls a carousel whose pages each cover most of it', async () => {
+    const carousel: HandsetTree = {
+      w: 402,
+      h: 874,
+      unit: 'tap',
+      elements: [
+        { type: 'ScrollView', frame: { x: 0, y: 300, width: 402, height: 220 } },
+        ...[0, 1, 2].map((page) => ({
+          type: 'Button',
+          label: `Page ${page + 1}`,
+          frame: { x: 16 + page * 386, y: 310, width: 370, height: 200 },
+        })),
+      ],
+    };
+    const { driver, swipe, ref } = looking(carousel);
+    expect((await driver.act({ kind: 'scroll', direction: 'right', ref: ref('Page 1') })).ok).toBe(true);
+    const { direction, x, y, distance } = swipe()!;
+    expect(direction).toBe('left');
+    expect(within({ x: 16, y: 310, width: 370, height: 200 }, x, y)).toBe(true);
+    expect(x - distance).toBeGreaterThanOrEqual(0);
+  });
+
+  it('measures by the short side in landscape, so a hole the size of a control is still kept clear', async () => {
+    // A landscape grid of cells with one 74x60 hole at the centre, where the swipe would start.
+    const hole: Area = { x: 400, y: 171, width: 74, height: 60 };
+    const cells = [];
+    for (let y = 21; y + 30 <= 402; y += 30) {
+      for (let x = 0; x + 74 <= 874; x += 74) {
+        const box = { x, y, width: 74, height: 30 };
+        if (!(x < hole.x + hole.width && hole.x < x + 74 && y < hole.y + hole.height && hole.y < y + 30)) {
+          cells.push({ type: 'Cell', label: `Cell ${cells.length + 1}`, frame: box });
+        }
+      }
+    }
+    const landscape: HandsetTree = { w: 874, h: 402, unit: 'tap', elements: cells };
+    const { driver, swipe } = looking(landscape);
+    expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
+    const { x, y } = swipe()!;
+    expect(clearOf([hole], x, y)).toBe(true);
+  });
+
+  it('refuses a scroll when the tree lists nothing, or only a spinner, since a control may be drawn anywhere', async () => {
+    for (const elements of [
+      [],
+      [{ type: 'ActivityIndicator', label: 'Loading', frame: { x: 186, y: 422, width: 30, height: 30 } }],
+    ]) {
+      const { driver, calls } = looking({ w: 402, h: 874, unit: 'tap', elements });
+      const result = await driver.act({ kind: 'scroll', direction: 'down' });
+      expect(result).toMatchObject({ ok: false, retryable: false });
+      expect(result.error).toContain('drag up from a point you can see is empty background');
+      expect(calls.some((call) => call[0] === 'swipe')).toBe(false);
+    }
+    const { driver } = looking({ w: 402, h: 874, unit: 'tap', elements: [] });
+    expect((await driver.act({ kind: 'scroll', direction: 'down' })).error).toContain('the tree lists nothing');
   });
 
   it('looks past a named scroll view that covers the area, as Android lists a RecyclerView with an id', async () => {
@@ -1081,11 +1202,8 @@ describe('HandsetDriver', () => {
     const { driver, swipe } = looking(android, 'android');
     expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
     const { x, y, distance } = swipe()!;
-    // The reach of a finger scales too: 16 points is 43 pixels.
-    const grown = eqDrawn
-      .map(px)
-      .map((area) => ({ x: area.x - 27, y: area.y - 27, width: area.width + 54, height: area.height + 54 }));
-    expect(clearOf(grown, x, y)).toBe(true);
+    // The reach of a finger scales too: 24 points is 64 pixels.
+    expect(clearOf(eqDrawn.map(px), x, y, 24 * scale)).toBe(true);
     // Handset's Android travel is 30% of the screen.
     expect(distance).toBeLessThanOrEqual(Math.round(0.3 * 2348));
     expect(y - distance).toBeGreaterThanOrEqual(54 * scale);

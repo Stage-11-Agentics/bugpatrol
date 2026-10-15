@@ -10,7 +10,7 @@ export type FingerDirection = 'up' | 'down' | 'left' | 'right';
  */
 export type ScrollStart = { x: number; y: number; distance: number; on?: UiElement } | { none: string };
 
-/** Lengths below are for a 402-point phone and scale with the screen's width, since Android tap units are pixels. */
+/** Lengths below are for a 402-point phone and scale with the screen's short side, since Android tap units are pixels. */
 const PHONE_WIDTH = 402;
 /** Kept clear of the left and right edges, where a swipe goes back, and of the bottom, where it goes home or meets Android's navigation bar. */
 const EDGE = 24;
@@ -41,13 +41,15 @@ const CELL = 2;
  * So empty space is not safe. Any empty square of `ROOM` inside the content
  * column may hold a drawn control. The content column runs from the leftmost
  * to the rightmost element, mirrored about the area's centre, since layouts
- * pad both sides alike; texts, buttons, fields and images fill it, and groups
- * do not. A start keeps `REACH` from every such square, from every control
- * that follows a drag (`drags`, the keyboard, and an image or group that
- * reports a value, such as Hum's volume knob), and from the whole row of a
- * place this session tapped or dragged (`touched`). What is left is a text, a
- * button or a gap too small to draw in, among other elements, or the margin
- * outside the content column.
+ * pad both sides alike. Texts, buttons, fields, images and groups that hold
+ * nothing else fill it (a React Native or Compose row is one named group); the
+ * scroll container does not. A start keeps `REACH` from every such square and
+ * every control that follows a drag (`drags`, and an image or group that
+ * reports a value, such as Hum's volume knob), `CLEAR` from switches, pickers
+ * and the keyboard (`controls`), and stays off the whole row of a place this
+ * session tapped or dragged (`touched`). What is left is a text, a button or a
+ * gap too small to draw in, among other elements, or the margin outside the
+ * content column. A tree that lists nothing gives no such place.
  *
  * Of those, a start off any control comes first, then one on a control that
  * does not follow a drag, such as a list row (`on` says so). Within each, the
@@ -64,14 +66,16 @@ export function scrollStart(input: {
   /** The usual travel in tap units, before it is fitted to the region. */
   travel: number;
   elements: UiElement[];
-  /** Controls in the tree that follow a drag: sliders, switches, pickers, maps. */
+  /** Controls in the tree that follow a drag of the finger in any direction: sliders, maps. */
   drags: Box[];
+  /** Controls in the tree that turn or flick: switches, pickers, segmented controls. */
+  controls: Box[];
   /** Around the places where this session tapped a bare point or began a drag, on this layout. */
   touched: Box[];
   /** The status bar's height. */
   top: number;
 }): ScrollStart {
-  const unit = input.screen.width / PHONE_WIDTH;
+  const unit = Math.min(input.screen.width, input.screen.height) / PHONE_WIDTH;
   const [edge, bottom, clear, step, minTravel, reach, room, cell] = [
     EDGE,
     BOTTOM,
@@ -103,8 +107,8 @@ export function scrollStart(input: {
 
   const near = (box: Box, x: number, y: number, margin: number) =>
     x > box.x - margin && x < box.x + box.width + margin && y > box.y - margin && y < box.y + box.height + margin;
-  // An element over half the area is the scroll container itself or a background (a named ScrollView,
-  // an Android RecyclerView with an id), not something on it.
+  // An element over half the area is a background or a page (a named ScrollView, an Android
+  // RecyclerView with an id), not something a start is on; it still fills the content column below.
   const overlap = (box: Box) =>
     Math.max(0, Math.min(box.x + box.width, region.x + region.width) - Math.max(box.x, region.x)) *
     Math.max(0, Math.min(box.y + box.height, region.y + region.height) - Math.max(box.y, region.y));
@@ -112,12 +116,31 @@ export function scrollStart(input: {
     (element) => element.role !== 'keyboard' && overlap(element.box) < 0.5 * region.width * region.height,
   );
   const reports = (element: UiElement) => (element.role === 'image' || element.role === 'group') && !!element.value;
-  const drags = [
-    ...input.drags,
+  const drags = [...input.drags, ...input.elements.filter(reports).map((element) => element.box)];
+  const controls = [
+    ...input.controls,
     ...input.elements.filter((element) => element.role === 'keyboard').map((element) => element.box),
-    ...elements.filter(reports).map((element) => element.box),
   ];
-  const fills = elements.filter((element) => element.role !== 'group' && !reports(element));
+  // What fills the content column, big or small: a carousel's pages and a hero image count.
+  const within = (inner: Box, outer: Box) =>
+    inner.x >= outer.x - unit &&
+    inner.y >= outer.y - unit &&
+    inner.x + inner.width <= outer.x + outer.width + unit &&
+    inner.y + inner.height <= outer.y + outer.height + unit;
+  const listed = input.elements.filter(
+    (element) =>
+      element.role !== 'keyboard' &&
+      !reports(element) &&
+      !(within(element.box, region) && within(region, element.box)) &&
+      element.box.y < input.screen.height &&
+      element.box.y + element.box.height > 0,
+  );
+  const fills = listed.filter(
+    (element) =>
+      element.role !== 'group' || !listed.some((other) => other !== element && within(other.box, element.box)),
+  );
+  if (!fills.length)
+    return { none: 'the tree lists nothing in the area to scroll, so the app may draw a control anywhere in it' };
   const space = drawable(fills, region, input.screen, input.top, room, cell);
 
   let best: { x: number; y: number; distance: number; on?: UiElement; score: number } | undefined;
@@ -125,7 +148,7 @@ export function scrollStart(input: {
   for (let y = upper; y <= lower; y += step) {
     if (input.touched.some((box) => y > box.y && y < box.y + box.height)) continue;
     for (let x = left; x <= right; x += step) {
-      if (drags.some((box) => near(box, x, y, reach))) continue;
+      if (drags.some((box) => near(box, x, y, reach)) || controls.some((box) => near(box, x, y, clear))) continue;
       if (space(x, y, reach)) continue;
       const distance = Math.min(travel, roomFor(x, y));
       if (distance < minTravel) {
@@ -164,25 +187,25 @@ function drawable(
   room: number,
   cell: number,
 ): (x: number, y: number, reach: number) => boolean {
-  const onScreen = fills.filter((element) => element.box.y < screen.height && element.box.y + element.box.height > 0);
   const centre = region.x + region.width / 2;
-  const leftmost = Math.min(...onScreen.map((element) => element.box.x));
-  const rightmost = Math.max(...onScreen.map((element) => element.box.x + element.box.width));
-  const [from, to] = onScreen.length
-    ? [
-        Math.max(region.x, Math.min(leftmost, 2 * centre - rightmost)),
-        Math.min(region.x + region.width, Math.max(rightmost, 2 * centre - leftmost)),
-      ]
-    : [region.x, region.x + region.width];
+  const leftmost = Math.min(...fills.map((element) => element.box.x));
+  const rightmost = Math.max(...fills.map((element) => element.box.x + element.box.width));
+  let [from, to] = [
+    Math.max(region.x, Math.min(leftmost, 2 * centre - rightmost)),
+    Math.min(region.x + region.width, Math.max(rightmost, 2 * centre - leftmost)),
+  ];
+  // Content narrower than a control, such as one spinner, says nothing about where the column is.
+  if (to - from < room) [from, to] = [region.x, region.x + region.width];
   const cols = Math.ceil((to - from) / cell);
   const rows = Math.ceil((screen.height - top) / cell);
-  const side = Math.ceil(room / cell);
-  if (cols < side || rows < side) return () => false;
+  // A cell an element touches is filled, so a gap of `room` holds at least this many free cells.
+  const side = Math.round(room / cell) - 1;
+  if (cols < side || rows < side) return () => true;
 
   // Filled cells, from a difference grid of every element.
   const width = cols + 1;
   const marks = new Int32Array(width * (rows + 1));
-  for (const { box } of onScreen) {
+  for (const { box } of fills) {
     const i0 = Math.max(0, Math.floor((box.x - from) / cell));
     const i1 = Math.min(cols, Math.ceil((box.x + box.width - from) / cell));
     const j0 = Math.max(0, Math.floor((box.y - top) / cell));

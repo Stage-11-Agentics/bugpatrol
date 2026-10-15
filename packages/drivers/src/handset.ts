@@ -93,9 +93,13 @@ const defaultExec =
     });
 
 const STATUS_BAR = { ios: 54, android: 24 } as const;
-/** Containers a swipe scrolls, and controls that follow a drag, which a scroll must not start on. */
+/**
+ * Containers a swipe scrolls; controls that follow a drag in any direction, which a scroll keeps a
+ * finger's reach from; and controls that turn or flick, which it only keeps off.
+ */
 const SCROLLER = /ScrollView|Table|CollectionView|WebView|RecyclerView|ListView|GridView|ViewPager/i;
-const DRAGGABLE = /Slider|Switch|Toggle|Picker|Adjustable|SeekBar|RatingBar|SegmentedControl|MapView|^Map$/i;
+const FOLLOWS = /Slider|Adjustable|SeekBar|RatingBar|MapView|^Map$/i;
+const TURNS = /Switch|Toggle|Picker|SegmentedControl/i;
 /** How far above and below a point this session tapped or dragged a scroll stays, across its whole row, on a 402-point phone. */
 const TOUCHED = 24;
 const TEXTBOX = /TextField|SecureTextField|SearchField|TextView|EditText/i;
@@ -439,7 +443,8 @@ export class HandsetDriver implements Driver {
    * new screen moves the control, and the place is forgotten.
    */
   private touch(at: { x: number; y: number }): void {
-    const pad = TOUCHED * ((this.lastObservation?.viewport.width ?? 402) / 402);
+    const viewport = this.lastObservation?.viewport ?? { width: 402, height: 874 };
+    const pad = TOUCHED * (Math.min(viewport.width, viewport.height) / 402);
     const box = { x: at.x - pad, y: at.y - pad, width: 2 * pad, height: 2 * pad };
     this.touched = [...this.touched, { box, tree: this.lastTree }].slice(-16);
   }
@@ -455,7 +460,7 @@ export class HandsetDriver implements Driver {
     if (!tree) return undefined;
     const screen = { width: tree.w, height: tree.h };
     const vertical = direction === 'up' || direction === 'down';
-    const unit = tree.w / 402;
+    const unit = Math.min(tree.w, tree.h) / 402;
     const point = at ?? { x: tree.w / 2, y: tree.h / 2 };
     const holds = (box: UiElement['box']) =>
       point.x >= box.x && point.x <= box.x + box.width && point.y >= box.y && point.y <= box.y + box.height;
@@ -464,7 +469,8 @@ export class HandsetDriver implements Driver {
       .flatMap((node) => (node.frame && SCROLLER.test(node.type ?? '') ? [node.frame] : []))
       .filter((box) => holds(box) && (vertical ? box.height >= 0.3 * tree.h : box.width >= 0.3 * tree.w))
       .sort((p, q) => p.width * p.height - q.width * q.height)[0];
-    const drags = tree.elements.flatMap((node) => (node.frame && DRAGGABLE.test(node.type ?? '') ? [node.frame] : []));
+    const frames = (types: RegExp) =>
+      tree.elements.flatMap((node) => (node.frame && types.test(node.type ?? '') ? [node.frame] : []));
     const touched = this.touched
       .filter((place) => place.tree && sameLayout(place.tree, tree))
       .map((place) => place.box);
@@ -475,7 +481,8 @@ export class HandsetDriver implements Driver {
       // Handset's own defaults: 400 points on iOS, 30% of the screen on Android.
       travel: this.platform === 'ios' ? 400 * unit : 0.3 * (vertical ? tree.h : tree.w),
       elements: handsetElements(tree, this.platform),
-      drags,
+      drags: frames(FOLLOWS),
+      controls: frames(TURNS),
       touched,
       // iOS's status bar, scaled: on Android about 145 px, a little more than its own bar.
       top: STATUS_BAR.ios * unit,
