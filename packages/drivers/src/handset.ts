@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type Locator, type Platform, sha256 } from '@bugpatrol/core';
+import type { Locator, Platform } from '@bugpatrol/core';
 import type { ScreenSnapshot } from '@bugpatrol/invariants';
 import { locatorFor, stepFor } from './dom.js';
 import { nativeSnapshot, pruneSystemChrome } from './maestro.js';
@@ -160,24 +160,33 @@ export function appErrors(lines: HandsetLogLine[], after: number): string[] {
   return out.slice(-20);
 }
 
-const TEXT = /StaticText|TextView/i;
+/** Frames that differ by no more than this, in tap units, are the same frame. */
+const LAYOUT_TOLERANCE = 1;
 
 /**
- * The layout of a tree: each element's type and frame, rounded to whole tap
- * units. Labels and values are left out, so live data (a speed, a clock, a
- * percentage) that ticks on every read does not hold up settling. A text
- * element's width, and its x when centred, follow its text, so only its row
- * counts: y and height.
+ * Whether two trees have the same layout: the same elements, by type, in the
+ * same order, each with the same row (y and height) and at least one of its
+ * left edge, centre or right edge in the same place. Labels and values are
+ * left out, so live data (a speed, a clock, a percentage) that ticks on every
+ * read does not hold up settling. When a label ticks its width changes, but
+ * the edge it is aligned by stays put; an element that slides moves all three.
  */
-export function layoutSignature(tree: HandsetTree): string {
-  const rows = tree.elements.flatMap((element) => {
-    const box = element.frame;
-    if (!box) return [];
-    const [x, y, width, height] = [box.x, box.y, box.width, box.height].map(Math.round);
-    const type = element.type ?? '';
-    return [TEXT.test(type) ? [type, y, height] : [type, x, y, width, height]];
+export function sameLayout(a: HandsetTree, b: HandsetTree): boolean {
+  const framed = (tree: HandsetTree) => tree.elements.filter((element) => element.frame);
+  const left = framed(a);
+  const right = framed(b);
+  if (left.length !== right.length) return false;
+  const near = (p: number, q: number) => Math.abs(p - q) <= LAYOUT_TOLERANCE;
+  return left.every((element, index) => {
+    const other = right[index]!;
+    const [p, q] = [element.frame!, other.frame!];
+    return (
+      (element.type ?? '') === (other.type ?? '') &&
+      near(p.y, q.y) &&
+      near(p.height, q.height) &&
+      (near(p.x, q.x) || near(p.x + p.width / 2, q.x + q.width / 2) || near(p.x + p.width, q.x + q.width))
+    );
   });
-  return sha256(JSON.stringify(rows));
 }
 
 /** Bugpatrol scrolls the content; a swipe moves the finger the other way. */
@@ -375,8 +384,8 @@ export class HandsetDriver implements Driver {
   }
 
   /**
-   * Settled means the layout stopped changing: two tree reads in a row with the
-   * same `layoutSignature`. A tree read is under a second when warm; the
+   * Settled means the layout stopped changing: two tree reads in a row with
+   * `sameLayout`. A tree read is under a second when warm; the
    * timeout is the backstop for a screen that keeps moving.
    */
   async settle(
@@ -385,14 +394,13 @@ export class HandsetDriver implements Driver {
     const timeout = options.timeoutMs ?? 6000;
     const interval = options.intervalMs ?? 250;
     const start = Date.now();
-    let previous = '';
+    let previous: HandsetTree | undefined;
     let frames = 0;
     while (Date.now() - start < timeout) {
       const tree = await this.call<HandsetTree>('tree');
-      const current = layoutSignature(tree);
       frames++;
-      if (current === previous) return { frames, stable: true };
-      previous = current;
+      if (previous && sameLayout(previous, tree)) return { frames, stable: true };
+      previous = tree;
       await new Promise((resolve) => setTimeout(resolve, interval));
     }
     return { frames, stable: false };

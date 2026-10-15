@@ -6,6 +6,7 @@ import {
   type HandsetLogLine,
   type HandsetTree,
   handsetElements,
+  sameLayout,
   swipeDirection,
 } from './handset.js';
 
@@ -133,6 +134,33 @@ describe('appErrors', () => {
     expect(appErrors(lines, Date.parse('2026-10-14T21:52:53.000Z'))).toEqual([
       'TypeError: undefined is not a function',
     ]);
+  });
+});
+
+describe('sameLayout', () => {
+  const one = (frame: { x: number; y: number; width: number; height: number }, type = 'StaticText'): HandsetTree => ({
+    ...tree,
+    elements: [{ type, label: 'x', frame }],
+  });
+  const at = { x: 100, y: 300, width: 80, height: 20 };
+
+  it('holds while a label ticks, on whichever edge it is aligned by', () => {
+    expect(sameLayout(one(at), one({ ...at, width: 86 }))).toBe(true); // left-aligned
+    expect(sameLayout(one(at), one({ ...at, x: 97, width: 86 }))).toBe(true); // centred
+    expect(sameLayout(one(at), one({ ...at, x: 94, width: 86 }))).toBe(true); // right-aligned
+    expect(sameLayout(one(at, 'Button'), one({ ...at, x: 97, width: 86 }, 'Button'))).toBe(true);
+  });
+
+  it('ignores sub-point jitter', () => {
+    expect(sameLayout(one(at), one({ x: 100.4, y: 300.6, width: 79.7, height: 20.33 }))).toBe(true);
+  });
+
+  it('sees an element slide, move down, resize in height, change type, or appear', () => {
+    expect(sameLayout(one(at), one({ ...at, x: 140 }))).toBe(false);
+    expect(sameLayout(one(at), one({ ...at, y: 310 }))).toBe(false);
+    expect(sameLayout(one(at), one({ ...at, height: 40 }))).toBe(false);
+    expect(sameLayout(one(at), one(at, 'Button'))).toBe(false);
+    expect(sameLayout(one(at), { ...tree, elements: [...one(at).elements, ...one(at).elements] })).toBe(false);
   });
 });
 
