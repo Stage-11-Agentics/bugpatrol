@@ -60,7 +60,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.DEPS }}
-          key: deps-all-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', '**/package.json', '.npmrc') }}
+          key: deps-all-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '**/package.json', '.npmrc') }}
       # pnpm at package.json's packageManager version. Node is the image's
       # own: 22 on ubuntu-24.04, pinned because ubuntu-latest moves to Ubuntu
       # 26. actions/setup-node spent 1-7 s on version checks.
@@ -73,13 +73,14 @@ jobs:
         name: Install
         if: steps.deps.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
-      - run: pnpm check --error-on-warnings
-      - run: pnpm knip
-      - if: always() && steps.install.outcome == 'success'
+      # Saved at once, so it holds what the install wrote and nothing later.
+      - if: steps.install.outcome == 'success'
         uses: actions/cache/save@v6
         with:
           path: ${{ env.DEPS }}
           key: ${{ steps.deps.outputs.cache-primary-key }}
+      - run: pnpm check --error-on-warnings
+      - run: pnpm knip
       - name: Job clock
         if: always()
         env:
@@ -102,7 +103,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.DEPS }}
-          key: deps-nosite-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', '**/package.json', '.npmrc') }}
+          key: deps-nosite-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '**/package.json', '.npmrc') }}
       - name: pnpm
         run: |
           mkdir -p "$HOME/.local/bin"
@@ -123,6 +124,12 @@ jobs:
         name: Install
         if: steps.deps.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile --filter '!@bugpatrol/site'
+      # Saved at once, so it holds what the install wrote and nothing later.
+      - if: steps.install.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.DEPS }}
+          key: ${{ steps.deps.outputs.cache-primary-key }}
       - id: build
         name: Typecheck and build
         run: pnpm exec tsc --build
@@ -135,11 +142,6 @@ jobs:
       - name: Hermetic tests
         timeout-minutes: 1
         run: bash .github/fast/test.sh
-      - if: always() && steps.install.outcome == 'success'
-        uses: actions/cache/save@v6
-        with:
-          path: ${{ env.DEPS }}
-          key: ${{ steps.deps.outputs.cache-primary-key }}
       # Saved from main only, as the build changes with every commit: a pull
       # request restores main's newest.
       - if: always() && github.event_name == 'push' && steps.build.outcome == 'success' && steps.tsc-cache.outputs.cache-hit != 'true'

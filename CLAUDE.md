@@ -28,8 +28,10 @@ requests the npm bundle).
 
   The push rows predate the dependency cache. Both pull request rows restored a stale build
   cache (10 s of TypeScript); a pull request restoring a fresh one from `main` spends 2 to 3 s.
-  A run that misses the dependency cache spends 3 to 5 s more saving it. `main` renews both
-  caches, so a push misses only after a lockfile change or 7 days without a push.
+  A run that misses the dependency cache installs from the registry and spends 3 to 5 s more
+  saving it, so a push that misses runs over its budget once. It misses after a change to the
+  lockfile, `pnpm-workspace.yaml`, any `package.json` or `.npmrc`, and after 7 days without a
+  push to `main`; a pull request's own save is not visible to `main`.
 
 - **Where the speed comes from.** Nothing reaches a registry on a cache hit: node_modules and
   corepack's copy of pnpm are cached for the exact lockfile and package.json files. They restore
