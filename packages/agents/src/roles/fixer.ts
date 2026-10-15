@@ -618,7 +618,8 @@ async function attemptsPrompt(
 /** What a step acted on, in words: its name, or, for a control with none, the name nearest it. */
 function targetWords(target: Locator): string {
   const unnamed = target.near ? `the unnamed ${target.role ?? 'control'} near "${target.near}"` : '';
-  const anonymous = target.role ? `the unnamed ${target.role}` : 'target';
+  const at = target.point ? `the point (${Math.round(target.point.x)}, ${Math.round(target.point.y)})` : 'target';
+  const anonymous = target.role ? `the unnamed ${target.role}` : at;
   return target.name || unnamed || target.testId || target.text || target.selector || anonymous;
 }
 
@@ -628,6 +629,7 @@ export function stepWords(step: RoutineStep): string {
     return `Type ${step.value}${step.submit ? ' and submit' : ''}`;
   }
   if (step.kind === 'scroll') return `Scroll ${step.direction}`;
+  if (step.kind === 'drag') return `Drag ${step.direction} ${step.distance} from (${step.from.x}, ${step.from.y})`;
   if (step.kind === 'press') return `Press ${step.key}`;
   if (step.kind === 'open') return `Open ${step.url}`;
   if (step.kind === 'window') return `Switch to window ${step.match}`;

@@ -553,6 +553,8 @@ export class MaestroDriver implements Driver {
     if (action.kind === 'request') return { ok: false, error: 'HTTP requests require the API driver' };
     if (action.kind === 'run') return { ok: false, error: 'Commands require the CLI driver' };
     if (action.kind === 'upload') return { ok: false, error: 'Uploads are supported on web and Electron only' };
+    if (action.kind === 'drag')
+      return { ok: false, error: 'Drag is supported on iOS and Android through the Handset driver' };
     try {
       let target: Target = {};
       switch (action.kind) {

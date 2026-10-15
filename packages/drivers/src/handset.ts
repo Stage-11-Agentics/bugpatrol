@@ -77,8 +77,8 @@ export class HandsetError extends Error {
   }
 }
 
-/** The target of a tap is covered: the app did nothing wrong, and nothing was tapped. */
-class HiddenTarget extends Error {}
+/** The driver would not act (a covered target, a point off the screen): the app did nothing wrong, and nothing was sent. */
+class Refused extends Error {}
 
 const defaultExec =
   (bin: string): HandsetExec =>
@@ -289,6 +289,7 @@ export function swipeDirection(direction: 'up' | 'down' | 'left' | 'right'): str
 
 /** Drive a leased Handset device. */
 export class HandsetDriver implements Driver {
+  readonly drags = true;
   private lastObservation?: Observation;
   /** Milliseconds since the epoch of the newest log line already reported. */
   private lastLogAt = 0;
@@ -396,7 +397,7 @@ export class HandsetDriver implements Driver {
     if (element) {
       const at = tapPoint(element, this.lastObservation?.elements ?? [element]);
       if ('hidden' in at) {
-        throw new HiddenTarget(
+        throw new Refused(
           `Not tapped: ${elementTitle(element)} is covered by ${elementTitle(at.hidden)} and does not show. Scroll it into view or close what covers it, then look again.`,
         );
       }
@@ -414,8 +415,18 @@ export class HandsetDriver implements Driver {
       }
     }
     if (!locator.point) throw new Error('No element matches the locator');
+    this.onScreen(locator.point, 'tapped');
     await this.call('tap', ['--x', String(locator.point.x), '--y', String(locator.point.y)]);
     return { degraded: true };
+  }
+
+  /** An explicit point is in tap units and on the screen the last observation saw. */
+  private onScreen(point: { x: number; y: number }, verb: string): void {
+    const screen = this.lastObservation?.viewport;
+    if (!screen || (point.x >= 0 && point.y >= 0 && point.x < screen.width && point.y < screen.height)) return;
+    throw new Refused(
+      `Not ${verb}: (${point.x}, ${point.y}) is outside the ${screen.width}x${screen.height} screen, in the units of the element boxes.`,
+    );
   }
 
   async act(action: DriverAction): Promise<ActResult> {
@@ -444,6 +455,36 @@ export class HandsetDriver implements Driver {
             args.push('--x', String(x), '--y', String(y));
           }
           await this.call('swipe', args);
+          break;
+        }
+        case 'drag': {
+          const { from, direction, distance } = action;
+          this.onScreen(from, 'dragged');
+          const screen = this.lastObservation?.viewport;
+          // The finger must end on the screen, as the start must: 0 to just under the width or height.
+          const room = screen
+            ? { up: from.y, down: screen.height - 1 - from.y, left: from.x, right: screen.width - 1 - from.x }[
+                direction
+              ]
+            : Number.POSITIVE_INFINITY;
+          if (distance > room) {
+            const way = direction === 'left' || direction === 'right' ? `to the ${direction}` : direction;
+            throw new Refused(
+              `Not dragged: from (${from.x}, ${from.y}) the screen allows at most ${Math.floor(room)} ${way}.`,
+            );
+          }
+          // A drag is a point, not an element: on replay it lands where it was recorded, whatever moved.
+          degraded = true;
+          await this.call('swipe', [
+            '--direction',
+            direction,
+            '--x',
+            String(from.x),
+            '--y',
+            String(from.y),
+            '--distance',
+            String(distance),
+          ]);
           break;
         }
         case 'back': {
@@ -484,7 +525,7 @@ export class HandsetDriver implements Driver {
       if (point && (step.kind === 'tap' || step.kind === 'type') && step.target) step.target.point = point;
       return { ok: true, ...(degraded ? { degraded } : {}), step };
     } catch (error) {
-      if (error instanceof HiddenTarget) return { ok: false, retryable: false, error: error.message };
+      if (error instanceof Refused) return { ok: false, retryable: false, error: error.message };
       if (error instanceof HandsetError) {
         return { ok: false, retryable: true, error: `device, not app: ${error.message}`.slice(0, 300) };
       }

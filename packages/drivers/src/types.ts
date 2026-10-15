@@ -76,6 +76,8 @@ export type DriverAction =
   | { kind: 'type'; ref?: string; locator?: Locator; value: string; submit?: boolean; append?: boolean }
   | { kind: 'press'; key: string }
   | { kind: 'scroll'; direction: 'up' | 'down' | 'left' | 'right'; ref?: string; locator?: Locator }
+  /** The finger's direction, not the content's. In the units of the element boxes. */
+  | { kind: 'drag'; from: { x: number; y: number }; direction: 'up' | 'down' | 'left' | 'right'; distance: number }
   | { kind: 'back' }
   | { kind: 'open'; url: string }
   | { kind: 'wait'; ms: number }
@@ -118,6 +120,8 @@ export interface Driver {
   onControlEvent?: (event: ControlEvent) => void;
   interrupt?(): void;
   readonly platform: Platform;
+  /** True when `act` takes a `drag`: a press at a point that moves the finger one way. */
+  readonly drags?: boolean;
   /** Connect to an app that `app.setup` already started. */
   connect(): Promise<void>;
   observe(): Promise<Observation>;

@@ -23,6 +23,7 @@ export type FakeScreen = {
 /** Small deterministic app for role tests; every screen has a valid PNG. */
 export class FakeDriver implements Driver {
   readonly platform: Platform;
+  readonly drags: boolean;
   readonly actions: DriverAction[] = [];
   connected = false;
   closed = false;
@@ -45,6 +46,7 @@ export class FakeDriver implements Driver {
   ) {
     this.current = start;
     this.platform = platform;
+    this.drags = platform === 'ios' || platform === 'android';
     const record = options.record;
     if (!record) return;
     this.startRecording = async () => {
@@ -100,6 +102,10 @@ export class FakeDriver implements Driver {
     if (this.failAt === this.actions.length) return { ok: false, error: 'fake action failed' };
     if (action.kind === 'tap') {
       const element = this.find(action.ref, action.locator);
+      // A bare point (tap_point) taps; a named locator that finds nothing fails, as a replay must.
+      const target = action.locator;
+      const bare = target?.point && !target.testId && !target.name && !target.text;
+      if (!element && !action.ref && target && bare) return { ok: true, step: { kind: 'tap', target } };
       if (!element) return { ok: false, error: 'element not found' };
       this.current = this.screens[this.current]?.next?.[element.ref] ?? this.current;
       return { ok: true, step: { kind: 'tap', target: locator(element) } };
@@ -135,6 +141,13 @@ export class FakeDriver implements Driver {
     if (action.kind === 'upload') return { ok: false, error: 'Uploads are supported on web and Electron only' };
     if (action.kind === 'wait') return { ok: true, step: { kind: 'wait', ms: action.ms } };
     if (action.kind === 'press') return { ok: true, step: { kind: 'press', key: action.key } };
+    if (action.kind === 'drag') {
+      return {
+        ok: true,
+        degraded: true,
+        step: { kind: 'drag', from: action.from, direction: action.direction, distance: action.distance },
+      };
+    }
     return { ok: true, step: { kind: 'back' } };
   }
 
