@@ -679,238 +679,389 @@ describe('HandsetDriver', () => {
   });
 
   /**
-   * Hum's eq tab. The band sliders, the notch frequency slider and the beat
-   * slider are drawn shapes with drag gestures: they are in no tree. Only the
-   * test knows where they are.
+   * Hum's tabs as the explorer saw them on Atlas, in session ses_20261015204528_2063: every
+   * element of an observation, turned back into a Handset node. The tree lists the scroll view's
+   * content above and below the screen, and no scroll view.
    */
   type Area = { x: number; y: number; width: number; height: number };
-  const text = (label: string, x: number, y: number, width = 60): HandsetTree['elements'][number] => ({
-    type: 'StaticText',
-    label,
-    frame: { x, y, width, height: 13 },
-  });
-  const eq: HandsetTree = {
+  type Row = [type: string, label: string, x: number, y: number, width: number, height: number, value?: string];
+  const humTree = (rows: Row[]): HandsetTree => ({
     w: 402,
     h: 874,
     unit: 'tap',
-    elements: [
-      { type: 'ScrollView', frame: { x: 0, y: 54, width: 402, height: 730 } },
-      text('FIVE BAND', 18, 120, 90),
-      ...[30, 100, 170, 240, 310].map((x) => text('+0.0', x, 150, 40)),
-      ...['60', '230', '910', '3.6k', '14k'].map((label, index) => text(label, 36 + index * 70, 308, 28)),
-      text('NOTCH FILTER', 18, 350, 98),
-      { type: 'Button', frame: { x: 338, y: 344, width: 46, height: 26 } },
-      text('frequency', 18, 390),
-      text('1.2 kHz', 330, 390, 52),
-      text('BINAURAL BEATS', 18, 470, 120),
-      { type: 'Button', frame: { x: 338, y: 464, width: 46, height: 26 } },
-      ...['delta', 'theta', 'alpha', 'beta', 'gamma'].map((label, index) => ({
-        type: 'Button',
-        label,
-        frame: { x: 18 + index * 74, y: 510, width: 66, height: 30 },
-      })),
-      text('beat', 18, 560, 40),
-      text('10 Hz', 340, 560, 42),
-      text('carrier', 18, 630, 50),
-      text('200 Hz', 330, 630, 52),
-      ...['noise', 'eq', 'nature'].map((label, index) => ({
-        type: 'Button',
-        label,
-        frame: { x: index * 134, y: 790, width: 134, height: 50 },
-      })),
-    ],
-  };
+    elements: rows.map(([type, label, x, y, width, height, value]) => ({
+      type,
+      ...(label ? { label } : {}),
+      ...(value ? { value } : {}),
+      frame: { x, y, width, height },
+    })),
+  });
+  /** The eq tab, just after a tap at (201, 400) set the 1k band to +9.0 dB. */
+  const humEq = humTree([
+    ['StaticText', '20 HZ', 23, 215, 32, 11],
+    ['StaticText', '200', 145, 215, 20, 11],
+    ['StaticText', '2K', 254, 215, 13, 11],
+    ['StaticText', '20K', 357, 215, 20, 11],
+    ['Button', 'noise', 17, 241, 117, 34],
+    ['Image', 'waveform', 38, 252, 12, 13],
+    ['StaticText', 'NOISE', 60, 252, 42, 13],
+    ['Button', 'eq', 142, 242, 117, 32],
+    ['Image', 'slider.vertical.3', 174, 253, 12, 11],
+    ['StaticText', 'EQ', 197, 252, 18, 13],
+    ['Button', 'nature', 266, 242, 117, 33],
+    ['Image', 'leaf', 281, 253, 13, 12],
+    ['StaticText', 'NATURE', 303, 252, 54, 13],
+    ['StaticText', 'EQUALIZER', 17, 306, 91, 15],
+    ['StaticText', '5-band · notch · motion', 17, 324, 123, 13],
+    ['StaticText', '0.0', 42, 357, 18, 12],
+    ['StaticText', '+0.5', 113, 357, 25, 12],
+    ['StaticText', '+9.0', 188, 357, 25, 12],
+    ['StaticText', '-2.7', 263, 357, 25, 12],
+    ['StaticText', '0.0', 341, 357, 18, 12],
+    ['StaticText', '60', 44, 564, 14, 12],
+    ['StaticText', '250', 115, 564, 20, 12],
+    ['StaticText', '1k', 195, 564, 11, 12],
+    ['StaticText', '4k', 269, 564, 13, 12],
+    ['StaticText', '12k', 341, 564, 18, 12],
+    ['StaticText', 'NOTCH FILTER', 33, 616, 104, 13],
+    ['Button', '', 321, 609, 47, 27],
+    ['StaticText', 'FREQUENCY', 33, 650, 76, 13],
+    ['StaticText', '1.8 kHz', 320, 650, 47, 13],
+    ['StaticText', 'WIDTH', 33, 709, 42, 13],
+    ['StaticText', 'wide', 340, 709, 27, 13],
+    ['StaticText', 'PINPOINT', 33, 762, 51, 11],
+    ['StaticText', 'WIDE', 340, 762, 28, 11],
+    ['StaticText', 'MASTER MODULATION', 33, 830, 160, 13],
+    ['Button', '?', 202, 827, 18, 18],
+    ['Button', '', 321, 823, 47, 27],
+    ['StaticText', '1 s', 351, 867, 11, 9],
+    ['StaticText', 'RATE', 33, 941, 31, 13],
+    ['StaticText', '12 s / breath', 279, 941, 88, 13],
+    ['StaticText', 'SLOW', 33, 995, 30, 11],
+    ['StaticText', 'FAST', 340, 995, 27, 11],
+    ['StaticText', 'DEPTH', 33, 1020, 42, 13],
+    ['StaticText', '3%', 354, 1020, 13, 13],
+    ['StaticText', 'SUBTLE', 33, 1073, 41, 11],
+    ['StaticText', 'DEEP', 340, 1073, 27, 11],
+    ['StaticText', 'MASTER SWAY', 33, 1140, 104, 13],
+    ['Button', '?', 146, 1138, 18, 18],
+    ['Button', '', 321, 1133, 47, 27],
+    ['StaticText', '1 s', 351, 1178, 11, 9],
+    ['StaticText', 'RATE', 33, 1252, 31, 13],
+    ['StaticText', '20 s / breath', 279, 1252, 88, 13],
+    ['StaticText', 'SLOW', 33, 1305, 30, 11],
+    ['StaticText', 'FAST', 340, 1305, 27, 11],
+    ['StaticText', 'DEPTH', 33, 1330, 42, 13],
+    ['StaticText', '70%', 347, 1330, 20, 13],
+    ['StaticText', 'CENTER', 33, 1383, 42, 11],
+    ['StaticText', 'WIDE', 340, 1383, 28, 11],
+    ['StaticText', 'BINAURAL', 33, 1451, 73, 13],
+    ['Button', '', 321, 1444, 47, 27],
+    ['StaticText', 'Headphones required — tunes the beat to a brainwave band.', 33, 1485, 291, 12],
+    ['Button', 'delta', 34, 1511, 42, 22],
+    ['Button', 'theta', 82, 1511, 43, 22],
+    ['Button', 'alpha', 131, 1511, 45, 22],
+    ['Button', 'beta', 182, 1511, 39, 22],
+    ['Button', 'gamma', 228, 1511, 53, 22],
+    ['StaticText', 'BEAT', 33, 1547, 31, 13],
+    ['StaticText', '8.0 Hz · alpha', 272, 1547, 95, 13],
+    ['StaticText', '0.5 HZ', 33, 1600, 35, 11],
+    ['StaticText', '40 HZ', 335, 1600, 32, 11],
+    ['StaticText', 'CARRIER', 33, 1625, 53, 13],
+    ['StaticText', '200 Hz', 327, 1625, 41, 13],
+    ['StaticText', '80 HZ', 33, 1678, 32, 11],
+    ['StaticText', '500 HZ', 328, 1678, 39, 11],
+    ['StaticText', 'VOLUME', 33, 1703, 52, 13],
+    ['StaticText', '35%', 347, 1703, 20, 13],
+    ['StaticText', 'QUIET', 33, 1756, 33, 11],
+    ['StaticText', 'PRESENT', 319, 1756, 48, 11],
+    ['Button', '15m', 98, 697, 41, 23],
+    ['Button', '30m', 146, 697, 43, 23],
+    ['Button', '1h', 196, 697, 32, 23],
+    ['Button', '2h', 234, 697, 33, 23],
+    ['Button', '∞', 273, 697, 30, 23],
+    ['StaticText', '119:04', 180, 730, 41, 13],
+    ['Image', 'power and volume', 163, 756, 76, 76, 'playing, volume 70 percent'],
+    ['Button', 'surprise me', 319, 769, 49, 49],
+  ]);
+  /** The noise tab: the orb knob is drawn round the two texts at the screen's centre. */
+  const humNoise = humTree([
+    ['StaticText', '20 Hz', 23, 215, 32, 11],
+    ['StaticText', '200', 145, 215, 20, 11],
+    ['StaticText', '2k', 254, 215, 13, 11],
+    ['StaticText', '20k', 357, 215, 20, 11],
+    ['Button', 'noise', 17, 241, 117, 34],
+    ['Image', 'waveform', 38, 252, 12, 13],
+    ['StaticText', 'noise', 60, 252, 42, 13],
+    ['Button', 'eq', 142, 242, 117, 32],
+    ['Image', 'slider.vertical.3', 174, 253, 12, 11],
+    ['StaticText', 'eq', 197, 252, 18, 13],
+    ['Button', 'nature', 266, 242, 117, 33],
+    ['Image', 'leaf', 281, 253, 13, 12],
+    ['StaticText', 'nature', 303, 252, 54, 13],
+    ['StaticText', 'noise', 17, 306, 50, 15],
+    ['StaticText', 'pink · -3 dB/oct', 17, 324, 81, 13],
+    ['Button', '', 337, 308, 47, 27],
+    ['StaticText', 'pink', 179, 435, 43, 31],
+    ['StaticText', '-3.0 dB/oct', 163, 471, 75, 13],
+    ['Button', 'brown', 41, 582, 65, 29],
+    ['Button', 'pink', 112, 582, 54, 29],
+    ['Button', 'white', 173, 582, 60, 29],
+    ['Button', 'blue', 240, 582, 54, 29],
+    ['Button', 'violet', 300, 582, 61, 29],
+    ['StaticText', 'modulation', 33, 656, 96, 13],
+    ['Button', '?', 138, 653, 18, 18],
+    ['Button', '', 321, 649, 47, 27],
+    ['StaticText', '1 s', 351, 693, 11, 9],
+    ['StaticText', 'rate', 33, 767, 31, 13],
+    ['StaticText', '13 s / breath', 279, 767, 88, 13],
+    ['StaticText', 'slow', 33, 821, 30, 11],
+    ['StaticText', 'fast', 340, 821, 27, 11],
+    ['StaticText', 'depth', 33, 846, 42, 13],
+    ['StaticText', '6%', 354, 846, 13, 13],
+    ['StaticText', 'subtle', 33, 899, 41, 11],
+    ['StaticText', 'deep', 340, 899, 27, 11],
+    ['StaticText', 'sway', 33, 962, 40, 13],
+    ['Button', '?', 82, 960, 18, 18],
+    ['Button', '', 321, 955, 47, 27],
+    ['StaticText', '1 s', 351, 1000, 11, 9],
+    ['StaticText', 'rate', 33, 1074, 31, 13],
+    ['StaticText', '8 s / breath', 286, 1074, 81, 13],
+    ['StaticText', 'slow', 33, 1127, 30, 11],
+    ['StaticText', 'fast', 340, 1127, 27, 11],
+    ['StaticText', 'depth', 33, 1152, 42, 13],
+    ['StaticText', '60%', 347, 1152, 20, 13],
+    ['StaticText', 'center', 33, 1206, 42, 11],
+    ['StaticText', 'wide', 340, 1206, 28, 11],
+    ['Button', '15m', 98, 720, 41, 23],
+    ['Button', '30m', 146, 720, 43, 23],
+    ['Button', '1h', 196, 720, 32, 23],
+    ['Button', '2h', 234, 720, 33, 23],
+    ['Button', '∞', 273, 720, 30, 23],
+    ['Image', 'power and volume', 163, 756, 76, 76, 'stopped, volume 70 percent'],
+    ['Button', 'surprise me', 319, 769, 49, 49],
+  ]);
+  /** The nature tab, scrolled to the fire and water layers: each label has a slider drawn beside it. */
+  const humNature = humTree([
+    ['StaticText', '20 HZ', 23, 215, 32, 11],
+    ['StaticText', '200', 145, 215, 20, 11],
+    ['StaticText', '2K', 254, 215, 13, 11],
+    ['StaticText', '20K', 357, 215, 20, 11],
+    ['Button', 'noise', 17, 241, 117, 34],
+    ['Image', 'waveform', 38, 252, 12, 13],
+    ['StaticText', 'NOISE', 60, 252, 42, 13],
+    ['Button', 'eq', 142, 242, 117, 32],
+    ['Image', 'slider.vertical.3', 174, 253, 12, 11],
+    ['StaticText', 'EQ', 197, 252, 18, 13],
+    ['Button', 'nature', 266, 242, 117, 33],
+    ['Image', 'leaf', 281, 253, 13, 12],
+    ['StaticText', 'NATURE', 303, 252, 54, 13],
+    ['StaticText', 'NATURE', 18, 305, 64, 15],
+    ['StaticText', '1 active', 282, 315, 37, 12],
+    ['StaticText', 'fire · water · air · earth', 18, 324, 116, 13],
+    ['Button', '', 337, 308, 47, 27],
+    ['StaticText', 'FIRE', 18, 357, 32, 13],
+    ['StaticText', 'crackle', 32, 394, 47, 17],
+    ['StaticText', 'hearth', 32, 446, 42, 17],
+    ['StaticText', 'WATER', 18, 497, 49, 13],
+    ['StaticText', 'rain', 32, 534, 24, 17],
+    ['StaticText', 'downpour', 32, 586, 65, 17],
+    ['StaticText', 'ocean', 32, 638, 40, 17],
+    ['StaticText', 'stream', 32, 690, 44, 17],
+    ['StaticText', 'AIR', 18, 740, 25, 13],
+    ['StaticText', 'wind', 32, 777, 30, 17],
+    ['StaticText', 'thunder', 32, 829, 50, 17],
+    ['StaticText', 'EARTH', 18, 880, 48, 13],
+    ['StaticText', 'earthquake', 32, 916, 73, 17],
+    ['StaticText', 'forest', 32, 968, 37, 17],
+    ['StaticText', 'crickets', 32, 1020, 51, 17],
+    ['Button', '15m', 98, 697, 41, 23],
+    ['Button', '30m', 146, 697, 43, 23],
+    ['Button', '1h', 196, 697, 32, 23],
+    ['Button', '2h', 234, 697, 33, 23],
+    ['Button', '∞', 273, 697, 30, 23],
+    ['StaticText', '117:26', 180, 730, 41, 13],
+    ['Image', 'power and volume', 163, 756, 76, 76, 'playing, volume 70 percent'],
+    ['Button', 'surprise me', 319, 769, 49, 49],
+  ]);
+  /**
+   * Where a touch drags something on those tabs, from Hum's SwiftUI layout (EQPanel.swift,
+   * Controls.swift, KnobView.swift, NaturePanel.swift) and checked against the session: no
+   * tree lists these. The eq tab's five band faders sit between their values and their labels,
+   * and the notch frequency slider under its row. The volume knob is in the tree as an image.
+   */
+  const knob: Area = { x: 163, y: 756, width: 76, height: 76 };
   const eqDrawn: Area[] = [
-    { x: 18, y: 172, width: 366, height: 128 },
-    { x: 18, y: 410, width: 366, height: 24 },
-    { x: 18, y: 580, width: 366, height: 24 },
-    { x: 18, y: 650, width: 366, height: 24 },
+    ...[0, 1, 2, 3, 4].map((band) => ({ x: 18 + band * 74.8, y: 378, width: 66.8, height: 178 })),
+    { x: 34, y: 671, width: 334, height: 24 },
+    knob,
   ];
-  /** Hum's noise tab: the orb knob is drawn in the middle of the screen, in no tree. */
-  const noise: HandsetTree = {
-    ...eq,
-    elements: [
-      { type: 'ScrollView', frame: { x: 0, y: 54, width: 402, height: 730 } },
-      text('NOISE', 18, 100, 52),
-      text('blue · +3 dB/oct', 18, 119, 104),
-      { type: 'Button', frame: { x: 338, y: 104, width: 46, height: 26 } },
-      // The knob draws its color and slope at its centre.
-      text('blue', 186, 420, 30),
-      text('+3 dB/oct', 170, 440, 62),
-      ...['brown', 'pink', 'white', 'blue', 'violet'].map((label, index) => ({
-        type: 'Button',
-        label,
-        frame: { x: 18 + index * 74, y: 560, width: 66, height: 30 },
-      })),
-      text('modulation', 18, 620, 90),
-      text('rate', 18, 660, 30),
-      text('0.2 Hz', 330, 660, 52),
-      ...eq.elements.slice(-3),
-    ],
-  };
-  const noiseDrawn: Area[] = [
-    { x: 101, y: 337, width: 200, height: 200 },
-    { x: 18, y: 680, width: 366, height: 24 },
+  const noiseDrawn: Area[] = [{ x: 101, y: 359, width: 200, height: 200 }, knob];
+  const natureDrawn: Area[] = [
+    ...[394, 446, 534, 586, 638, 690, 777, 829].map((y) => ({ x: 138, y: y - 3.5, width: 232, height: 24 })),
+    knob,
   ];
+  /**
+   * On Hum, swipes that began 10 to 12 points outside a band or the notch slider dragged it, since
+   * iOS hit-tests a finger, not a point. A start must be farther away than that.
+   */
+  const clearOf = (areas: Area[], x: number, y: number) =>
+    areas.every(
+      (area) => x < area.x - 16 || x > area.x + area.width + 16 || y < area.y - 16 || y > area.y + area.height + 16,
+    );
 
-  /** A driver that has just observed `observed`, with the swipe it sends. */
-  const looking = (observed: HandsetTree) => {
+  /** A driver that has just observed `observed`, with refs as the explorer numbers them, and the swipe it sends. */
+  const looking = (observed: HandsetTree, platform: 'ios' | 'android' = 'ios') => {
     const { calls, exec } = fake({});
-    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    const driver = new HandsetDriver(platform, { lease: 'ls_1' }, exec);
+    const elements = handsetElements(observed, platform).map((element, index) => ({
+      ...element,
+      ref: `e${index + 1}`,
+    }));
     Object.assign(driver as unknown as Record<string, unknown>, {
       lastTree: observed,
-      lastObservation: {
-        elements: handsetElements(observed, 'ios'),
-        viewport: { width: observed.w, height: observed.h, scale: 3 },
-      },
+      lastObservation: { elements, viewport: { width: observed.w, height: observed.h, scale: 3 } },
     });
     const swipe = () => {
-      const call = calls.find((args) => args[0] === 'swipe');
+      const call = calls.findLast((args) => args[0] === 'swipe');
       if (!call) return undefined;
       const value = (flag: string) => (call.includes(flag) ? Number(call[call.indexOf(flag) + 1]) : undefined);
       return {
         direction: call[call.indexOf('--direction') + 1],
-        x: value('--x'),
-        y: value('--y'),
-        distance: value('--distance'),
+        x: value('--x')!,
+        y: value('--y')!,
+        distance: value('--distance')!,
       };
     };
-    return { driver, calls, swipe };
+    const ref = (name: string) => elements.find((element) => element.name === name)!.ref;
+    return { driver, calls, swipe, ref };
   };
-  const within = (area: Area, x: number, y: number) =>
-    x >= area.x && x <= area.x + area.width && y >= area.y && y <= area.y + area.height;
-  const onElement = (observed: HandsetTree, x: number, y: number) =>
-    handsetElements(observed, 'ios').some((element) => within(element.box, x, y));
 
-  it("starts a scroll beside a label, not on the EQ band's label it was given, nor on a drawn slider", async () => {
-    const { driver, swipe } = looking(eq);
-    const band = handsetElements(eq, 'ios').find((element) => element.name === '60')!;
-    expect((await driver.act({ kind: 'scroll', direction: 'down', ref: band.ref })).ok).toBe(true);
+  it("keeps a scroll on Hum's eq tab clear of the band it tapped and of the sliders, where session 6 dragged the band", async () => {
+    const { driver, swipe, ref } = looking(humEq);
+    expect((await driver.act({ kind: 'tap', locator: { point: { x: 201, y: 400 } } })).ok).toBe(true);
+    // Session 6 scrolled down from NOTCH FILTER: the swipe began at (216, 566), beside the 1k label,
+    // 10 points below the band, and set it to +12.0 dB.
+    expect(ref('NOTCH FILTER')).toBe('e26');
+    const result = await driver.act({ kind: 'scroll', direction: 'down', ref: 'e26' });
+    expect(result.ok).toBe(true);
     const { direction, x, y, distance } = swipe()!;
     expect(direction).toBe('up');
-    expect(x).toBeDefined();
-    expect(eqDrawn.some((area) => within(area, x!, y!))).toBe(false);
-    expect(onElement(eq, x!, y!)).toBe(false);
-    // In the gap between a label and its value: on the carrier row, between "carrier" and "200 Hz".
-    expect(y).toBeGreaterThanOrEqual(630);
-    expect(y).toBeLessThanOrEqual(643);
-    expect(x).toBeGreaterThan(68);
-    expect(x).toBeLessThan(330);
-    // The finger stays inside the scroll view.
+    expect(clearOf(eqDrawn, x, y)).toBe(true);
+    // The tapped band's whole row is out, not only the point.
+    expect(Math.abs(y - 400)).toBeGreaterThanOrEqual(24);
     expect(distance).toBeGreaterThanOrEqual(60);
-    expect(y! - distance!).toBeGreaterThanOrEqual(54);
+    expect(y - distance).toBeGreaterThanOrEqual(54);
+    expect(result.note).toBeUndefined();
+  });
+
+  it("keeps a scroll with no ref clear of Hum's eq bands before anything is touched, in every direction", async () => {
+    // Session 5 scrolled up with no ref on this layout: the swipe began at (216, 366), between two
+    // band values, 12 points above the 1k band, and set it to -12.0 dB.
+    for (const direction of ['up', 'down', 'left', 'right'] as const) {
+      const { driver, swipe } = looking(humEq);
+      expect((await driver.act({ kind: 'scroll', direction })).ok).toBe(true);
+      const { x, y } = swipe()!;
+      expect(clearOf(eqDrawn, x, y)).toBe(true);
+    }
+  });
+
+  it('starts a scroll with no ref clear of the orb knob at the centre of the noise tab, in every direction', async () => {
+    for (const direction of ['down', 'up', 'left', 'right'] as const) {
+      const { driver, swipe } = looking(humNoise);
+      expect((await driver.act({ kind: 'scroll', direction })).ok).toBe(true);
+      const { x, y } = swipe()!;
+      expect(clearOf(noiseDrawn, x, y)).toBe(true);
+    }
+  });
+
+  it("starts a scroll clear of the sliders drawn beside the labels on Hum's nature tab", async () => {
+    for (const direction of ['down', 'up'] as const) {
+      const { driver, swipe } = looking(humNature);
+      expect((await driver.act({ kind: 'scroll', direction })).ok).toBe(true);
+      const { x, y } = swipe()!;
+      expect(clearOf(natureDrawn, x, y)).toBe(true);
+    }
+  });
+
+  it('keeps a scroll off the whole row of a place this session dragged, while the layout holds', async () => {
+    const { driver, swipe, calls } = looking(humNature);
+    expect((await driver.act({ kind: 'scroll', direction: 'up' })).ok).toBe(true);
+    const free = swipe()!;
+    // A drag far to the right of the start, on its row.
+    expect((await driver.act({ kind: 'drag', from: { x: 300, y: free.y }, direction: 'right', distance: 40 })).ok).toBe(
+      true,
+    );
+    calls.length = 0;
+    await driver.act({ kind: 'scroll', direction: 'up' });
+    const kept = swipe()!;
+    expect(Math.abs(kept.y - free.y)).toBeGreaterThanOrEqual(24);
+    expect(clearOf(natureDrawn, kept.x, kept.y)).toBe(true);
+    // The screen scrolled: the drawn control moved with it, and the place is forgotten.
+    const scrolled = {
+      ...humNature,
+      elements: [
+        ...humNature.elements.slice(0, -1),
+        { type: 'StaticText', label: 'more', frame: { x: 32, y: 1072, width: 40, height: 17 } },
+      ],
+    };
+    (driver as unknown as { lastTree: HandsetTree }).lastTree = scrolled;
+    calls.length = 0;
+    await driver.act({ kind: 'scroll', direction: 'up' });
+    expect([swipe()!.x, swipe()!.y]).toEqual([free.x, free.y]);
+  });
+
+  it('keeps a scroll off a slider in the tree, by the reach of a finger', async () => {
+    const rows: HandsetTree = {
+      w: 402,
+      h: 874,
+      unit: 'tap',
+      elements: [
+        { type: 'Table', frame: { x: 0, y: 54, width: 402, height: 736 } },
+        ...Array.from({ length: 16 }, (_, index) =>
+          index === 8
+            ? { type: 'Slider', label: 'Volume', frame: { x: 0, y: 54 + index * 46, width: 402, height: 46 } }
+            : {
+                type: 'Cell',
+                label: `Setting ${index + 1}`,
+                frame: { x: 0, y: 54 + index * 46, width: 402, height: 46 },
+              },
+        ),
+      ],
+    };
+    const { driver, swipe } = looking(rows);
+    expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
+    const { x, y } = swipe()!;
+    expect(clearOf([{ x: 0, y: 422, width: 402, height: 46 }], x, y)).toBe(true);
   });
 
   it('looks past a named scroll view that covers the area, as Android lists a RecyclerView with an id', async () => {
     const named: HandsetTree = {
-      ...eq,
+      ...humEq,
       elements: [
-        { type: 'ScrollView', id: 'eq-scroll', frame: { x: 0, y: 54, width: 402, height: 730 } },
-        ...eq.elements.slice(1),
+        { type: 'ScrollView', id: 'eq-scroll', frame: { x: 0, y: 283, width: 402, height: 402 } },
+        ...humEq.elements,
       ],
     };
     const { driver, swipe } = looking(named);
     const result = await driver.act({ kind: 'scroll', direction: 'down' });
+    expect(result.ok).toBe(true);
     expect(result.note).toBeUndefined();
-    const { x, y } = swipe()!;
-    expect(eqDrawn.some((area) => within(area, x!, y!))).toBe(false);
-    expect(y).toBeGreaterThanOrEqual(630);
-    expect(y).toBeLessThanOrEqual(643);
-  });
-
-  it('starts a scroll with no ref away from the orb knob at the centre of the screen, in every direction', async () => {
-    for (const direction of ['down', 'up', 'left', 'right'] as const) {
-      const { driver, swipe } = looking(noise);
-      expect((await driver.act({ kind: 'scroll', direction })).ok).toBe(true);
-      const { x, y } = swipe()!;
-      expect(x).toBeDefined();
-      expect(noiseDrawn.some((area) => within(area, x!, y!))).toBe(false);
-    }
-  });
-
-  /** Hum's nature tab: each row is a label, then a slider drawn to the end of the row. */
-  const nature: HandsetTree = {
-    ...eq,
-    elements: [
-      { type: 'ScrollView', frame: { x: 0, y: 54, width: 402, height: 730 } },
-      text('NATURE', 18, 100, 60),
-      text('3 active', 250, 100, 60),
-      { type: 'Button', frame: { x: 338, y: 94, width: 46, height: 26 } },
-      ...['rain', 'stream', 'ocean', 'thunder', 'wind', 'fire', 'birds', 'crickets', 'frogs', 'cafe', 'train'].map(
-        (label, index) => text(label, 18, 160 + index * 50, 90),
-      ),
-      ...eq.elements.slice(-3),
-    ],
-  };
-  const natureDrawn: Area[] = Array.from({ length: 11 }, (_, index) => ({
-    x: 124,
-    y: 154 + index * 50,
-    width: 260,
-    height: 24,
-  }));
-
-  it("starts a scroll on a label, not on the slider drawn beside it on Hum's nature tab", async () => {
-    const { driver, swipe } = looking(nature);
-    for (const direction of ['down', 'up'] as const) {
-      expect((await driver.act({ kind: 'scroll', direction })).ok).toBe(true);
-    }
-    const { x, y } = swipe()!;
-    expect(natureDrawn.some((area) => within(area, x!, y!))).toBe(false);
-  });
-
-  it('keeps a scroll off a slider in the tree', async () => {
-    const slider: HandsetTree = {
-      ...eq,
-      elements: [
-        { type: 'ScrollView', frame: { x: 0, y: 54, width: 402, height: 730 } },
-        text('volume', 18, 600, 60),
-        { type: 'Slider', label: 'Volume', frame: { x: 90, y: 590, width: 290, height: 34 } },
-        text('balance', 18, 700, 60),
-      ],
-    };
-    const { driver, swipe } = looking(slider);
-    expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
-    const { x, y } = swipe()!;
-    expect(within({ x: 82, y: 582, width: 306, height: 50 }, x!, y!)).toBe(false);
-  });
-
-  it('keeps a scroll off a place this session dragged, while the layout holds', async () => {
-    const rate: HandsetTree = {
-      ...eq,
-      elements: [
-        { type: 'ScrollView', frame: { x: 0, y: 54, width: 402, height: 730 } },
-        text('rate', 18, 600, 60),
-        text('0.2 Hz', 330, 600, 52),
-      ],
-    };
-    const { driver, swipe, calls } = looking(rate);
-    expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
-    const free = swipe()!;
-    // The gap between "rate" and its value, nearest the ideal start.
-    expect([free.x, free.y]).toEqual([200, 606]);
-    expect((await driver.act({ kind: 'drag', from: { x: 200, y: 606 }, direction: 'right', distance: 80 })).ok).toBe(
-      true,
-    );
-    calls.length = 0;
-    await driver.act({ kind: 'scroll', direction: 'down' });
-    const kept = swipe()!;
-    expect(within({ x: 168, y: 574, width: 64, height: 64 }, kept.x!, kept.y!)).toBe(false);
-    // The screen scrolled: the drawn control moved with it, and the place is forgotten.
-    const scrolled = { ...rate, elements: [...rate.elements, text('footer', 18, 760, 60)] };
-    (driver as unknown as { lastTree: HandsetTree }).lastTree = scrolled;
-    calls.length = 0;
-    await driver.act({ kind: 'scroll', direction: 'down' });
-    expect([swipe()!.x, swipe()!.y]).toEqual([200, 606]);
+    const { x, y, distance } = swipe()!;
+    expect(clearOf(eqDrawn, x, y)).toBe(true);
+    // Inside the scroll view, and the finger stays in it.
+    expect(y).toBeGreaterThan(283);
+    expect(y - distance).toBeGreaterThanOrEqual(283);
   });
 
   it('chooses against the tree that the last settle read', async () => {
-    const { calls, exec } = fake({ tree: envelope('tree', noise) });
+    const { calls, exec } = fake({ tree: envelope('tree', humNoise) });
     const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
     await driver.settle({ timeoutMs: 1000, intervalMs: 0 });
     expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
     const call = calls.find((args) => args[0] === 'swipe')!;
     const [x, y] = [Number(call[call.indexOf('--x') + 1]), Number(call[call.indexOf('--y') + 1])];
-    expect(noiseDrawn.some((area) => within(area, x, y))).toBe(false);
+    expect(clearOf(noiseDrawn, x, y)).toBe(true);
   });
 
   it('scales to an Android screen in pixels', async () => {
@@ -925,29 +1076,26 @@ describe('HandsetDriver', () => {
       w: 1080,
       h: 2348,
       unit: 'tap',
-      elements: eq.elements.map((node) => ({ ...node, frame: node.frame && px(node.frame) })),
+      elements: humEq.elements.map((node) => ({ ...node, frame: node.frame && px(node.frame) })),
     };
-    const { calls, exec } = fake({});
-    const driver = new HandsetDriver('android', { lease: 'ls_1' }, exec);
-    Object.assign(driver as unknown as Record<string, unknown>, {
-      lastTree: android,
-      lastObservation: {
-        elements: handsetElements(android, 'android'),
-        viewport: { width: 1080, height: 2348, scale: 1 },
-      },
-    });
+    const { driver, swipe } = looking(android, 'android');
     expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
-    const call = calls.find((args) => args[0] === 'swipe')!;
-    const [x, y, distance] = ['--x', '--y', '--distance'].map((flag) => Number(call[call.indexOf(flag) + 1]));
-    expect(eqDrawn.map(px).some((area) => within(area, x!, y!))).toBe(false);
-    // Handset's Android travel is 30% of the screen, and the finger stays inside the scroll view.
+    const { x, y, distance } = swipe()!;
+    // The reach of a finger scales too: 16 points is 43 pixels.
+    const grown = eqDrawn
+      .map(px)
+      .map((area) => ({ x: area.x - 27, y: area.y - 27, width: area.width + 54, height: area.height + 54 }));
+    expect(clearOf(grown, x, y)).toBe(true);
+    // Handset's Android travel is 30% of the screen.
     expect(distance).toBeLessThanOrEqual(Math.round(0.3 * 2348));
-    expect(y! - distance!).toBeGreaterThanOrEqual(54 * scale);
+    expect(y - distance).toBeGreaterThanOrEqual(54 * scale);
   });
 
   it('scrolls a list from a row when the list has no empty space, and says so', async () => {
     const rows: HandsetTree = {
-      ...eq,
+      w: 402,
+      h: 874,
+      unit: 'tap',
       elements: [
         { type: 'Table', frame: { x: 0, y: 54, width: 402, height: 736 } },
         ...Array.from({ length: 16 }, (_, index) => ({
@@ -961,12 +1109,16 @@ describe('HandsetDriver', () => {
     const result = await driver.act({ kind: 'scroll', direction: 'down' });
     expect(result.ok).toBe(true);
     expect(swipe()!.x).toBeDefined();
-    expect(result.note).toMatch(/^The scroll started on "Ride \d+": the area to scroll has no empty space or text\.$/);
+    expect(result.note).toMatch(
+      /^The scroll started on "Ride \d+": nothing else in the area to scroll is clear of controls\.$/,
+    );
   });
 
-  it('refuses a scroll when every point is on a control that follows a drag, and says how to scroll instead', async () => {
+  it('refuses a scroll when every point is on or near a control that follows a drag, and says how to scroll instead', async () => {
     const sliders: HandsetTree = {
-      ...eq,
+      w: 402,
+      h: 874,
+      unit: 'tap',
       elements: Array.from({ length: 20 }, (_, index) => ({
         type: 'Slider',
         label: `Band ${index + 1}`,
@@ -978,6 +1130,27 @@ describe('HandsetDriver', () => {
     expect(result).toMatchObject({ ok: false, retryable: false });
     expect(result.error).toContain('Not scrolled');
     expect(result.error).toContain('drag');
+    expect(calls.some((call) => call[0] === 'swipe')).toBe(false);
+  });
+
+  it('refuses a scroll when all the empty space could hold a drawn control, and nothing is sent', async () => {
+    // Two rows of text on a blank screen: the blank could be a slider or a knob the tree does not list.
+    const sparse: HandsetTree = {
+      w: 402,
+      h: 874,
+      unit: 'tap',
+      elements: [
+        { type: 'ScrollView', frame: { x: 0, y: 54, width: 402, height: 730 } },
+        { type: 'StaticText', label: 'rate', frame: { x: 18, y: 600, width: 60, height: 13 } },
+        { type: 'StaticText', label: '0.2 Hz', frame: { x: 330, y: 600, width: 52, height: 13 } },
+      ],
+    };
+    const { driver, calls } = looking(sparse);
+    const result = await driver.act({ kind: 'scroll', direction: 'down' });
+    expect(result).toMatchObject({ ok: false, retryable: false });
+    expect(result.error).toBe(
+      'Not scrolled: every point in the area to scroll is on or near a control that follows a drag, or near empty space where the app may draw one. To scroll down, drag up from a point you can see is empty background.',
+    );
     expect(calls.some((call) => call[0] === 'swipe')).toBe(false);
   });
 

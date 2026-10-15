@@ -96,7 +96,7 @@ const STATUS_BAR = { ios: 54, android: 24 } as const;
 /** Containers a swipe scrolls, and controls that follow a drag, which a scroll must not start on. */
 const SCROLLER = /ScrollView|Table|CollectionView|WebView|RecyclerView|ListView|GridView|ViewPager/i;
 const DRAGGABLE = /Slider|Switch|Toggle|Picker|Adjustable|SeekBar|RatingBar|SegmentedControl|MapView|^Map$/i;
-/** How far round a point this session tapped or dragged a scroll stays away, on a 402-point phone. */
+/** How far above and below a point this session tapped or dragged a scroll stays, across its whole row, on a 402-point phone. */
 const TOUCHED = 24;
 const TEXTBOX = /TextField|SecureTextField|SearchField|TextView|EditText/i;
 const BUTTON = /Button|Cell|Link|Tab|MenuItem|Switch|Toggle|CheckBox|Slider|Picker|ImageButton/i;
@@ -435,8 +435,8 @@ export class HandsetDriver implements Driver {
 
   /**
    * Remember where a bare tap or a drag began, so a later scroll does not
-   * start on that control. It holds while the layout does: a scroll or a new
-   * screen moves the control, and the place is forgotten.
+   * start on that control's row. It holds while the layout does: a scroll or a
+   * new screen moves the control, and the place is forgotten.
    */
   private touch(at: { x: number; y: number }): void {
     const pad = TOUCHED * ((this.lastObservation?.viewport.width ?? 402) / 402);
@@ -447,8 +447,8 @@ export class HandsetDriver implements Driver {
   /**
    * Where a scroll starts and how far it goes, inside the scroll container
    * under `at` (an element of the area to scroll) or under the screen's
-   * centre, away from controls that follow a drag. Undefined when no tree
-   * has been read.
+   * centre, clear of controls that follow a drag and of empty space where the
+   * app may draw one. Undefined when no tree has been read.
    */
   private scrollFrom(direction: 'up' | 'down' | 'left' | 'right', at?: { x: number; y: number }) {
     const tree = this.lastTree;
@@ -464,9 +464,7 @@ export class HandsetDriver implements Driver {
       .flatMap((node) => (node.frame && SCROLLER.test(node.type ?? '') ? [node.frame] : []))
       .filter((box) => holds(box) && (vertical ? box.height >= 0.3 * tree.h : box.width >= 0.3 * tree.w))
       .sort((p, q) => p.width * p.height - q.width * q.height)[0];
-    const draggable = tree.elements.flatMap((node) =>
-      node.frame && DRAGGABLE.test(node.type ?? '') ? [node.frame] : [],
-    );
+    const drags = tree.elements.flatMap((node) => (node.frame && DRAGGABLE.test(node.type ?? '') ? [node.frame] : []));
     const touched = this.touched
       .filter((place) => place.tree && sameLayout(place.tree, tree))
       .map((place) => place.box);
@@ -477,7 +475,8 @@ export class HandsetDriver implements Driver {
       // Handset's own defaults: 400 points on iOS, 30% of the screen on Android.
       travel: this.platform === 'ios' ? 400 * unit : 0.3 * (vertical ? tree.h : tree.w),
       elements: handsetElements(tree, this.platform),
-      avoid: [...draggable, ...touched],
+      drags,
+      touched,
       // iOS's status bar, scaled: on Android about 145 px, a little more than its own bar.
       top: STATUS_BAR.ios * unit,
     });
@@ -519,13 +518,13 @@ export class HandsetDriver implements Driver {
           const args = ['--direction', finger];
           if (start && 'none' in start) {
             throw new Refused(
-              `Not scrolled: ${start.none}. To scroll ${action.direction}, drag ${finger} from a point on empty background.`,
+              `Not scrolled: ${start.none}. To scroll ${action.direction}, drag ${finger} from a point you can see is empty background.`,
             );
           }
           if (start) {
             args.push('--x', String(start.x), '--y', String(start.y), '--distance', String(start.distance));
             if (start.on) {
-              note = `The scroll started on ${elementTitle(start.on)}: the area to scroll has no empty space or text.`;
+              note = `The scroll started on ${elementTitle(start.on)}: nothing else in the area to scroll is clear of controls.`;
             }
           } else if (at) {
             // No tree read yet: start on the element, as before.

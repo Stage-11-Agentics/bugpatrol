@@ -528,7 +528,7 @@ export function explorerTools(
           {
             name: 'drag',
             description:
-              'Press at a point and move the finger in one direction, for a slider, knob or other control that follows a drag. x, y and distance are in the unit of the element boxes, as the Screen line gives it. direction is where the finger moves: right moves a horizontal slider up. To scroll, use scroll; when scroll is refused, drag from a point on empty background. Recorded and replayed as degraded.',
+              'Press at a point and move the finger in one direction, for a slider, knob or other control that follows a drag. x, y and distance are in the unit of the element boxes, as the Screen line gives it. direction is where the finger moves: right moves a horizontal slider up. To scroll, use scroll; when scroll is refused, drag from a point you can see is empty background, away from sliders and knobs. Recorded and replayed as degraded.',
             inputSchema: schema(
               {
                 x: { type: 'number', minimum: 0 },
@@ -695,7 +695,7 @@ export function explorerTools(
     {
       name: 'scroll',
       description:
-        'Scroll one direction. ref: an element inside the area to scroll, such as a list or a carousel. On iOS and Android the swipe starts on empty space in that area, away from controls; to start it at a point you choose, use drag.',
+        'Scroll one direction. ref: an element inside the area to scroll, such as a list or a carousel. On iOS and Android the swipe starts on a text, a button or the margin, clear of sliders and of empty space where the app may draw one; when there is no such place it is refused. To start it at a point you choose, use drag.',
       inputSchema: schema(
         {
           direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] },
