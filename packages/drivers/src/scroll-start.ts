@@ -135,8 +135,10 @@ export function scrollStart(input: {
       element.box.y < input.screen.height &&
       element.box.y + element.box.height > 0,
   );
+  // A same-frame pair, such as a SwiftUI navigation row's cell and button, is one element: both fill.
   const fills = listed.filter(
-    (element) => !listed.some((other) => other !== element && within(other.box, element.box)),
+    (element) =>
+      !listed.some((other) => other !== element && within(other.box, element.box) && !within(element.box, other.box)),
   );
   const inArea = (box: Box) =>
     box.x < region.x + region.width &&

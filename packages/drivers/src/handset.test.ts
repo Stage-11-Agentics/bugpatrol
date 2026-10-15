@@ -1124,6 +1124,28 @@ describe('HandsetDriver', () => {
     }
   });
 
+  it('scrolls a list of SwiftUI navigation rows, each a cell and a button on one frame', async () => {
+    const rows: HandsetTree = {
+      w: 402,
+      h: 874,
+      unit: 'tap',
+      elements: [
+        { type: 'Table', frame: { x: 0, y: 54, width: 402, height: 736 } },
+        ...Array.from({ length: 16 }, (_, index) => {
+          const frame = { x: 0, y: 54 + index * 46, width: 402, height: 46 };
+          return [
+            { type: 'Cell', id: `row-${index + 1}`, frame },
+            { type: 'Button', label: `Ride ${index + 1}`, frame },
+          ];
+        }).flat(),
+      ],
+    };
+    const { driver, swipe } = looking(rows);
+    const result = await driver.act({ kind: 'scroll', direction: 'down' });
+    expect(result.ok).toBe(true);
+    expect(swipe()!.y).toBeGreaterThan(54);
+  });
+
   it('scrolls a list of React Native rows, each one named group with nothing inside', async () => {
     const rows: HandsetTree = {
       w: 402,
