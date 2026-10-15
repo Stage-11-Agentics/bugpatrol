@@ -7,7 +7,8 @@
 # One entry per line, its reason after the #:
 #   <path>          a test file Fast never runs
 #   push: <path>    a test file Fast runs on pull requests only
-#   test: <name>    one test Fast skips by its exact name, wherever it is
+#   test: <name>    a test Fast skips: any whose full name (its describe
+#                   blocks and its own name, joined by spaces) ends with <name>
 
 # These launch Playwright's Chromium, which Fast does not install.
 packages/capture/src/font-audit.test.ts    # Chromium
@@ -15,13 +16,16 @@ packages/capture/src/probe.test.ts         # Chromium
 packages/drivers/src/dom.test.ts           # Chromium
 packages/drivers/src/api.test.ts           # Chromium
 packages/agents/src/api-replay.test.ts     # Chromium
-packages/drivers/src/recording.test.ts     # Chromium and ffmpeg, 3 of its 4 tests
 
 # Over 3 s each on the runner: pull requests run them, pushes do not.
 push: packages/agents/src/review.test.ts         # 16 s
 push: packages/agents/src/fixer-patrol.test.ts   # 5.6 s
 push: packages/agents/src/replay.test.ts         # 3.1 s
 
+# In packages/drivers/src/recording.test.ts.
+test: records a real page into a video with frames and no secret   # Chromium
+test: records the context that the app opened, over CDP   # Chromium
+test: cuts a long, wide video to the review budget   # ffmpeg
 # In review.test.ts, which pull requests run.
 test: records the replay on both builds, and shows both recordings side by side with the full videos   # ffmpeg
 test: checks status and body on both builds with no model, and shows both HTTP transcripts as terminal recordings   # Chromium

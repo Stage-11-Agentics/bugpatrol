@@ -15,18 +15,22 @@ event=${GITHUB_EVENT_NAME:-pull_request}
 args=()
 names=()
 trim() { sed -E 's/^[[:space:]]+|[[:space:]]+$//g' <<<"$1"; }
+exclude() {
+  if [ ! -e "$1" ]; then
+    echo "::warning title=Stale quarantine entry::$1 does not exist; remove it from .github/fast/quarantine.txt."
+  fi
+  args+=(--exclude "$1")
+}
 
 while IFS= read -r line || [ -n "$line" ]; do
   entry=$(trim "${line%%#*}")
   case $entry in
     '') ;;
     push:*)
-      if [ "$event" = push ]; then
-        args+=(--exclude "$(trim "${entry#push:}")")
-      fi
+      if [ "$event" = push ]; then exclude "$(trim "${entry#push:}")"; fi
       ;;
     test:*) names+=("$(trim "${entry#test:}")") ;;
-    *) args+=(--exclude "$entry") ;;
+    *) exclude "$entry" ;;
   esac
 done <.github/fast/quarantine.txt
 
@@ -35,7 +39,7 @@ for ((i = 1; i < ${#args[@]}; i += 2)); do echo "  file  ${args[i]}"; done
 for name in "${names[@]}"; do echo "  test  $name"; done
 
 if [ ${#names[@]} -gt 0 ]; then
-  # Skip each named test: the full name must not end with any of them.
+  # Skip each named test: a full name must not end with any of them.
   pattern=$(printf '%s\n' "${names[@]}" | sed -E 's/[][(){}.*+?^$|\\/]/\\&/g' | paste -sd '|' -)
   args+=(--testNamePattern "^(?!.*(?:$pattern)$)")
 fi

@@ -29,23 +29,25 @@ permissions:
   contents: read
   actions: read # the clock step reads the job's start time
 
+# A new push to a pull request cancels its older run; every push to main runs.
 concurrency:
-  group: fast-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: fast-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
 
 env:
   FAST_BUDGET: ${{ github.event_name == 'pull_request' && 60 || 30 }}
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: ${{ github.event_name == 'pull_request' && 2 || 1 }}
     steps:
       - uses: actions/checkout@v7
       # The version comes from package.json's packageManager.
       - uses: pnpm/action-setup@v5
-      # Node is the runner image's own (22): actions/setup-node spent 1-7 s
-      # on version checks. No dependency cache: restoring the pnpm store
+      # Node is the runner image's own: 22 on ubuntu-24.04, pinned because
+      # ubuntu-latest moves to Ubuntu 26. actions/setup-node spent 1-7 s on
+      # version checks. No dependency cache: restoring the pnpm store
       # (228 MB) takes longer than installing from the registry. knip reads
       # every workspace, the site too, so this job installs it all.
       - name: Install
@@ -61,14 +63,14 @@ jobs:
         run: bash .github/fast/clock.sh
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: ${{ github.event_name == 'pull_request' && 2 || 1 }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v5
       # TypeScript's incremental build: each package's dist and its
       # tsconfig.tsbuildinfo, which records every file by a hash of its
-      # content, so a stale cache costs time, never correctness.
+      # content, so a stale cache costs time, not a wrong typecheck.
       - id: tsc-cache
         uses: actions/cache/restore@v6
         with:
@@ -85,6 +87,12 @@ jobs:
       - id: build
         name: Typecheck and build
         run: pnpm exec tsc --build
+      # The npm package is an esbuild bundle of the workspace; about 1 s.
+      - name: Bundle (pull requests)
+        if: github.event_name == 'pull_request'
+        run: |
+          pnpm --filter bugpatrol build
+          node packages/bugpatrol/dist/bin.js --version
       - name: Hermetic tests
         timeout-minutes: 1
         run: bash .github/fast/test.sh

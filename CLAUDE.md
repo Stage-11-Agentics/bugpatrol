@@ -9,13 +9,14 @@ fork adds. `AGENTS.md` is a symlink to this file.
 ## CI: the Fast workflow
 
 `.github/workflows/fast.yml` runs on every pull request and every push to `main`, as two parallel
-jobs: `lint` (Biome, knip) and `test` (the TypeScript build and the hermetic tests).
+jobs: `lint` (Biome, knip) and `test` (the TypeScript build, the hermetic tests, and on pull
+requests the npm bundle).
 
 - **Budget** on GitHub's job clock (a runner starting the job to its completion; queue time is
   not counted): push 30 s, pull request 60 s. Over budget is a defect: move the slowest test out
   or make it faster, and never raise a budget or a timeout to make a run fit. Each job's last
-  step prints its clock and raises an `Over budget` warning. Hard caps: 1 minute on push, 2 on a
-  pull request.
+  step prints its clock and raises an `Over budget` warning; it never fails the job, so runner
+  noise cannot block a merge. Hard caps: 1 minute on push, 2 on a pull request.
 - **Measured** (cold: no TypeScript cache; warm: restored):
 
   | Event | Cache | lint | test | Run |
@@ -25,18 +26,24 @@ jobs: `lint` (Biome, knip) and `test` (the TypeScript build and the hermetic tes
   | pull request | cold | 18 s | 43 s | 38796806537 |
   | pull request | warm | 17 s | 35 s | 38798169345 |
 
+  A cold push sits on its budget. `main` saves the cache on every push, so a push is cold only
+  when `main` has had no push for 7 days and GitHub has evicted it.
+
 - **Where the speed comes from.** No dependency cache: restoring the 228 MB pnpm store takes 5 s,
-  installing from the registry 3 to 8 s. No `actions/setup-node`: the runner image's Node is 22,
-  and setup-node's version checks took 1 to 7 s. `test` does not install the site. TypeScript's
-  incremental build (each `dist` and `tsconfig.tsbuildinfo`) is saved from `main` and restored
-  by everything else: 2 to 3 s warm, 11 s cold. Vitest runs with `--no-isolate`, which cut the files outside `review.test.ts` from 20 s
-  to 8.5 s. If a test fails only in Fast and passes alone, suspect state
-  shared between test files.
+  installing from the registry 3 to 8 s. No `actions/setup-node`: the jobs pin `ubuntu-24.04`,
+  whose Node is 22, and setup-node's version checks took 1 to 7 s. `test` does not install the
+  site. TypeScript's incremental build (each `dist` and `tsconfig.tsbuildinfo`) is saved from
+  `main` and restored by everything else: 2 to 3 s warm, 10 to 11 s cold. Vitest runs with
+  `--no-isolate`, which cut the files outside `review.test.ts` from 20 s to 8.5 s. If a test
+  fails only in Fast and passes alone, suspect state shared between test files.
 - **Quarantine.** `.github/fast/quarantine.txt` lists everything Fast leaves out, with the
-  reason: six files and three tests that need Playwright's Chromium or ffmpeg, one dashboard test
+  reason: five files and six tests that need Playwright's Chromium or ffmpeg, one dashboard test
   that waits a fixed 700 ms for a file watcher, and three files over 3 s that run on pull
   requests only. Quarantine a slow or flaky test the day it shows, with one line (`<path>`,
-  `push: <path>` or `test: <exact test name>`, then `# reason`). Fix it and delete the line.
+  `push: <path>` or `test: <end of its full name>`, then `# reason`). Fix it and delete the line.
+- **Runs nowhere on this fork:** the quarantined tests, the site's typecheck and build, and the
+  suite with each file isolated (`pnpm test`). Upstream's CI runs them on an upstream pull
+  request.
 - **Run what Fast runs:** `pnpm build && bash .github/fast/test.sh`; prefix
   `GITHUB_EVENT_NAME=push` for the push set.
 - **Every test has a timeout:** vitest's 5 s default, or its file's own `{ timeout }`.
