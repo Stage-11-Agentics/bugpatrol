@@ -17,8 +17,10 @@ packages/drivers/src/api.test.ts           # Chromium
 packages/agents/src/api-replay.test.ts     # Chromium
 packages/drivers/src/recording.test.ts     # Chromium and ffmpeg, 3 of its 4 tests
 
-# 16 s on its own in one worker, which alone breaks the push budget.
-push: packages/agents/src/review.test.ts   # slow
+# Over 3 s each on the runner: pull requests run them, pushes do not.
+push: packages/agents/src/review.test.ts         # 16 s
+push: packages/agents/src/fixer-patrol.test.ts   # 5.6 s
+push: packages/agents/src/replay.test.ts         # 3.1 s
 
 test: records the replay on both builds, and shows both recordings side by side with the full videos   # ffmpeg
 test: checks status and body on both builds with no model, and shows both HTTP transcripts as terminal recordings   # Chromium
