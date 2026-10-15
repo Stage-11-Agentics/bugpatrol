@@ -10,11 +10,11 @@ const STEP = 4;
 /** How far a child's frame may overhang its parent's (a badge, a wide label) and still be inside it. */
 const OVERHANG = 4;
 
-const inside = (inner: Box, outer: Box) =>
-  inner.x >= outer.x - OVERHANG &&
-  inner.y >= outer.y - OVERHANG &&
-  inner.x + inner.width <= outer.x + outer.width + OVERHANG &&
-  inner.y + inner.height <= outer.y + outer.height + OVERHANG;
+const inside = (inner: Box, outer: Box, overhang = OVERHANG) =>
+  inner.x >= outer.x - overhang &&
+  inner.y >= outer.y - overhang &&
+  inner.x + inner.width <= outer.x + outer.width + overhang &&
+  inner.y + inner.height <= outer.y + outer.height + overhang;
 
 const covers = (box: Box, x: number, y: number) =>
   x >= box.x - MARGIN && x <= box.x + box.width + MARGIN && y >= box.y - MARGIN && y <= box.y + box.height + MARGIN;
@@ -26,7 +26,9 @@ export type TapPoint = { x: number; y: number; covered?: UiElement } | { hidden:
  * children, so an element later in the tree is drawn over the target, except:
  * one that lies inside it (its own label or icon), and a container that is
  * not a control and holds all of it (a scroll view, a background), which is
- * more likely behind than in front. The software keyboard always covers.
+ * more likely behind than in front. That also lets through a sheet or a scrim
+ * that is not a control, as the plain centre tap did. The software keyboard
+ * always covers.
  * When something covers the centre, the point that shows nearest the centre;
  * when none shows, `hidden` names the topmost cover, and nothing is tapped.
  */
@@ -36,7 +38,7 @@ export function tapPoint(target: UiElement, elements: UiElement[]): TapPoint {
   const after = elements.slice(elements.indexOf(target) + 1);
   const over = after
     .filter(
-      (item) => !inside(item.box, box) && (item.role === 'keyboard' || item.interactive || !inside(box, item.box)),
+      (item) => item.role === 'keyboard' || (!inside(item.box, box) && (item.interactive || !inside(box, item.box, 1))),
     )
     .reverse();
   const coveredAt = (x: number, y: number) => over.find((item) => covers(item.box, x, y));
