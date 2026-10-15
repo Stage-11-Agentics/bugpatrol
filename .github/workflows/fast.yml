@@ -61,7 +61,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 2 || 1 }}
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v5
@@ -87,6 +87,18 @@ jobs:
       - name: Hermetic tests
         timeout-minutes: 1
         run: bash .github/fast/test.sh
+      - name: x push set default workers
+        run: GITHUB_EVENT_NAME=push bash .github/fast/test.sh 2>&1 | grep -E 'Duration|Tests  '
+      - name: x push set 4 workers
+        run: GITHUB_EVENT_NAME=push bash .github/fast/test.sh --maxWorkers=4 --minWorkers=4 2>&1 | grep -E 'Duration|Tests  '
+      - name: x push set 6 workers
+        run: GITHUB_EVENT_NAME=push bash .github/fast/test.sh --maxWorkers=6 --minWorkers=6 2>&1 | grep -E 'Duration|Tests  '
+      - name: x push set shard 1/2
+        run: GITHUB_EVENT_NAME=push bash .github/fast/test.sh --shard=1/2 2>&1 | grep -E 'Duration|Tests  '
+      - name: x push set shard 2/2
+        run: GITHUB_EVENT_NAME=push bash .github/fast/test.sh --shard=2/2 2>&1 | grep -E 'Duration|Tests  '
+      - name: x pr set 4 workers
+        run: bash .github/fast/test.sh --maxWorkers=4 --minWorkers=4 2>&1 | grep -E 'Duration|Tests  '
       - if: always() && steps.build.outcome == 'success' && steps.tsc-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
