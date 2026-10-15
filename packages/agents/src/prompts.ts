@@ -10,7 +10,7 @@ const BROWSER_NOTES =
   'Bugpatrol accepts every native dialog (alert, confirm, prompt) and lists it under Dialogs, so an action behind a confirm goes ahead. Open each collapsed control to see what it hides. To test an upload, use `upload` on the file input or the control that opens the file picker.';
 
 const PHONE_POINTS =
-  'A control that is not in the element list, such as a drawn slider or knob, takes `tap_point` or `drag` at a point you read off the screenshot. Points are the unit of the element boxes: place the control against the boxes of the elements beside it.';
+  'A control that is not in the element list, such as a drawn slider or knob, takes `tap_point`, or `drag` where it is offered, at a point you read off the screenshot. Use the unit of the element boxes, which the Screen line names: place the control against the boxes of the elements beside it.';
 
 const PLATFORM_NOTES: Record<Platform, string> = {
   desktop:

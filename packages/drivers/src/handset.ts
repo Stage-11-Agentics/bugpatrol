@@ -289,6 +289,7 @@ export function swipeDirection(direction: 'up' | 'down' | 'left' | 'right'): str
 
 /** Drive a leased Handset device. */
 export class HandsetDriver implements Driver {
+  readonly drags = true;
   private lastObservation?: Observation;
   /** Milliseconds since the epoch of the newest log line already reported. */
   private lastLogAt = 0;
@@ -424,7 +425,7 @@ export class HandsetDriver implements Driver {
     const screen = this.lastObservation?.viewport;
     if (!screen || (point.x >= 0 && point.y >= 0 && point.x < screen.width && point.y < screen.height)) return;
     throw new Refused(
-      `Not ${verb}: (${point.x}, ${point.y}) is outside the ${screen.width}x${screen.height}-point screen. Points are in the units of the element boxes, not screenshot pixels.`,
+      `Not ${verb}: (${point.x}, ${point.y}) is outside the ${screen.width}x${screen.height} screen, in the units of the element boxes.`,
     );
   }
 
@@ -460,15 +461,20 @@ export class HandsetDriver implements Driver {
           const { from, direction, distance } = action;
           this.onScreen(from, 'dragged');
           const screen = this.lastObservation?.viewport;
+          // The finger must end on the screen, as the start must: 0 to just under the width or height.
           const room = screen
-            ? { up: from.y, down: screen.height - from.y, left: from.x, right: screen.width - from.x }[direction]
+            ? { up: from.y, down: screen.height - 1 - from.y, left: from.x, right: screen.width - 1 - from.x }[
+                direction
+              ]
             : Number.POSITIVE_INFINITY;
           if (distance > room) {
             const way = direction === 'left' || direction === 'right' ? `to the ${direction}` : direction;
             throw new Refused(
-              `Not dragged: from (${from.x}, ${from.y}) the screen allows at most ${Math.floor(room)} points ${way}.`,
+              `Not dragged: from (${from.x}, ${from.y}) the screen allows at most ${Math.floor(room)} ${way}.`,
             );
           }
+          // A drag is a point, not an element: on replay it lands where it was recorded, whatever moved.
+          degraded = true;
           await this.call('swipe', [
             '--direction',
             direction,

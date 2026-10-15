@@ -572,7 +572,7 @@ describe('explorer, replay, and judge', () => {
     }
   });
 
-  it('offers point taps and drags on iOS and Android, in points, and replays a drag', async () => {
+  it('offers point taps and drags on iOS and Android, in the unit of the boxes, and replays a drag', async () => {
     const f = await fixture();
     try {
       for (const platform of ['ios', 'android'] as const) {
@@ -589,6 +589,21 @@ describe('explorer, replay, and judge', () => {
         expect(names).toContain('drag');
       }
       expect(explorerTools(f.session).some((tool) => ['tap_point', 'drag'].includes(tool.name))).toBe(false);
+      // A phone driver that cannot drag (Maestro) is offered tap_point only.
+      const maestro = new FakeDriver(f.screens, 'home', 'android');
+      (maestro as { drags: boolean }).drags = false;
+      const noDrag = explorerTools(
+        new AgentSession(f.root, f.session.config, f.session.vars, f.session.sessionId, 'explorer', maestro),
+      ).map((tool) => tool.name);
+      expect(noDrag).toContain('tap_point');
+      expect(noDrag).not.toContain('drag');
+      // Android tap units are pixels.
+      const android = explorerTools(
+        new AgentSession(f.root, f.session.config, f.session.vars, f.session.sessionId, 'explorer', maestro),
+      );
+      expect(JSON.stringify(await run(android, 'look'))).toContain(
+        'Screen: 100x100 pixels, the unit of the element boxes',
+      );
 
       const driver = new FakeDriver(f.screens, 'home', 'ios');
       const session = new AgentSession(
@@ -600,11 +615,14 @@ describe('explorer, replay, and judge', () => {
         driver,
       );
       const tools = explorerTools(session);
-      expect(JSON.stringify(await run(tools, 'look'))).toContain('Screen: 100x100 points');
+      expect(JSON.stringify(await run(tools, 'look'))).toContain(
+        'Screen: 100x100 points, the unit of the element boxes',
+      );
       await run(tools, 'tap_point', { x: 20, y: 64 });
       expect(driver.actions.at(-1)).toEqual({ kind: 'tap', locator: { point: { x: 20, y: 64 } } });
+      expect(stepWords(session.trail.at(-1)!)).toBe('Tap the point (20, 64)');
       const dragged = await run(tools, 'drag', { x: 10, y: 60, direction: 'right', distance: 50 });
-      expect(dragged.meta?.summary).toBe('Dragged right 50 points from (10, 60)');
+      expect(dragged.meta?.summary).toBe('Dragged right 50 from (10, 60)');
       const drag = { kind: 'drag', from: { x: 10, y: 60 }, direction: 'right', distance: 50 };
       expect(driver.actions.at(-1)).toEqual(drag);
       expect(session.trail.at(-1)).toMatchObject(drag);

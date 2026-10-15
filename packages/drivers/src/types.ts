@@ -120,6 +120,8 @@ export interface Driver {
   onControlEvent?: (event: ControlEvent) => void;
   interrupt?(): void;
   readonly platform: Platform;
+  /** True when `act` takes a `drag`: a press at a point that moves the finger one way. */
+  readonly drags?: boolean;
   /** Connect to an app that `app.setup` already started. */
   connect(): Promise<void>;
   observe(): Promise<Observation>;

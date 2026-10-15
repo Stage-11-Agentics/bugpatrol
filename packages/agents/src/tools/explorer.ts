@@ -87,8 +87,12 @@ function observationText(observation: Observation): string {
   return [
     `Location: ${observation.location}`,
     `Windows: ${windows}`,
-    // tap_point and drag take points: the screenshot is this size, scaled.
-    ...(phone ? [`Screen: ${observation.viewport.width}x${observation.viewport.height} points`] : []),
+    // tap_point and drag take the unit of the element boxes: points on iOS, pixels on Android.
+    ...(phone
+      ? [
+          `Screen: ${observation.viewport.width}x${observation.viewport.height} ${observation.platform === 'ios' ? 'points' : 'pixels'}, the unit of the element boxes`,
+        ]
+      : []),
     ...errorLines(observation),
     ...(observation.http
       ? [
@@ -283,7 +287,7 @@ function describe(session: AgentSession, action: DriverAction): string {
     case 'scroll':
       return `Scrolled ${action.direction}`;
     case 'drag':
-      return `Dragged ${action.direction} ${action.distance} points from (${action.from.x}, ${action.from.y})`;
+      return `Dragged ${action.direction} ${action.distance} from (${action.from.x}, ${action.from.y})`;
     case 'back':
       return 'Went back';
     case 'open':
@@ -488,7 +492,7 @@ export function explorerTools(
           {
             name: 'tap_point',
             description: phone
-              ? 'Tap an explicit point when no ref can reach the control, such as a drawn slider or knob that is not in the element list. Coordinates are points, the unit of the element boxes; the observation gives the screen size in points, and the screenshot shows that screen scaled. Recorded and replayed as degraded; never a fallback from an ambiguous ref.'
+              ? 'Tap an explicit point when no ref can reach the control, such as a drawn slider or knob that is not in the element list. Coordinates are in the unit of the element boxes (points on iOS, pixels on Android); the observation gives the screen size in that unit, and the screenshot shows that screen scaled. Recorded and replayed as degraded; never a fallback from an ambiguous ref.'
               : 'Tap an explicit point in the latest native window screenshot when no semantic ref can reach the control. Coordinates are screenshot pixels. Recorded and replayed as degraded; never a fallback from an ambiguous ref.',
             inputSchema: schema({ x: { type: 'number', minimum: 0 }, y: { type: 'number', minimum: 0 } }, ['x', 'y']),
             run(input: Record<string, unknown>) {
@@ -497,18 +501,18 @@ export function explorerTools(
           },
         ]
       : []),
-    ...(phone
+    ...(phone && session.driver?.drags
       ? [
           {
             name: 'drag',
             description:
-              'Press at a point and move the finger in one direction, for a slider, knob or other control that follows a drag. x, y and distance are points, the unit of the element boxes. direction is where the finger moves: right moves a horizontal slider up. To scroll, use scroll.',
+              'Press at a point and move the finger in one direction, for a slider, knob or other control that follows a drag. x, y and distance are in the unit of the element boxes, as the Screen line gives it. direction is where the finger moves: right moves a horizontal slider up. To scroll, use scroll. Recorded and replayed as degraded.',
             inputSchema: schema(
               {
                 x: { type: 'number', minimum: 0 },
                 y: { type: 'number', minimum: 0 },
                 direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] },
-                distance: { type: 'number', exclusiveMinimum: 0 },
+                distance: { type: 'number', minimum: 1 },
               },
               ['x', 'y', 'direction', 'distance'],
             ),

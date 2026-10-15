@@ -654,9 +654,11 @@ describe('HandsetDriver', () => {
       '--json',
     ]);
     expect(result.step).toEqual({ kind: 'drag', from: { x: 40, y: 640 }, direction: 'right', distance: 120 });
+    // A point, not an element: a replay cannot check that the control is still there.
+    expect(result.degraded).toBe(true);
   });
 
-  it('taps an explicit point in points, and refuses a point or a drag that leaves the screen', async () => {
+  it('taps an explicit point in tap units, and refuses a point or a drag that leaves the screen', async () => {
     const { calls, exec } = fake({});
     const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
     screen(driver);
@@ -665,10 +667,14 @@ describe('HandsetDriver', () => {
     const sent = calls.length;
     const outside = await driver.act({ kind: 'tap', locator: { point: { x: 1206, y: 640 } } });
     expect(outside).toMatchObject({ ok: false, retryable: false });
-    expect(outside.error).toContain('outside the 402x874-point screen');
+    expect(outside.error).toContain('outside the 402x874 screen, in the units of the element boxes');
     const far = await driver.act({ kind: 'drag', from: { x: 300, y: 640 }, direction: 'right', distance: 200 });
     expect(far).toMatchObject({ ok: false, retryable: false });
-    expect(far.error).toContain('at most 102 points to the right');
+    expect(far.error).toContain('at most 101 to the right');
+    const high = await driver.act({ kind: 'drag', from: { x: 200, y: 50 }, direction: 'up', distance: 60 });
+    expect(high.error).toContain('at most 50 up');
+    const low = await driver.act({ kind: 'drag', from: { x: 200, y: 800 }, direction: 'down', distance: 74 });
+    expect(low.error).toContain('at most 73 down');
     expect(calls).toHaveLength(sent);
   });
 

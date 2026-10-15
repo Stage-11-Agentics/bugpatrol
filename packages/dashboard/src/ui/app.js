@@ -1000,13 +1000,14 @@ function issueStatus(issue, fix) {
 function stepWords(step) {
   const unnamed = step.target?.near ? `the unnamed ${step.target.role || 'control'} near "${step.target.near}"` : '';
   const named = step.target?.name || step.target?.text || step.target?.testId || step.target?.selector;
-  const target = step.target?.name || !unnamed ? `"${named || 'target'}"` : unnamed;
+  const point = step.target?.point;
+  const at = point ? `the point (${Math.round(point.x)}, ${Math.round(point.y)})` : '"target"';
+  const target = step.target?.name || !unnamed ? (named ? `"${named}"` : at) : unnamed;
   if (step.kind === 'tap') return `Tap ${target}`;
   if (step.kind === 'type') return `Type "${step.value}"${step.submit ? ' and submit' : ''}`;
   if (step.kind === 'press') return `Press ${step.key}`;
   if (step.kind === 'scroll') return `Scroll ${step.direction}`;
-  if (step.kind === 'drag')
-    return `Drag ${step.direction} ${step.distance} points from (${step.from.x}, ${step.from.y})`;
+  if (step.kind === 'drag') return `Drag ${step.direction} ${step.distance} from (${step.from.x}, ${step.from.y})`;
   if (step.kind === 'open') return `Open ${step.url}`;
   if (step.kind === 'wait') return `Wait ${step.ms} ms`;
   if (step.kind === 'window') return `Switch to window "${step.match}"`;
