@@ -1,0 +1,42 @@
+name: Fast
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: nproc; df -h . | tail -1; command -v ffmpeg || echo no-ffmpeg; ls ~/.cache/ms-playwright 2>&1 | head -3
+      - run: time pnpm install --frozen-lockfile --prefer-offline
+      - run: du -sh node_modules/.pnpm "$(pnpm store path)" || true
+      - run: time pnpm exec tsc --build
+        continue-on-error: true
+      - run: time pnpm check --error-on-warnings
+        continue-on-error: true
+      - run: time pnpm knip
+        continue-on-error: true
+      - run: time pnpm exec vitest run --reporter=default --reporter=json --outputFile=vitest.json
+        continue-on-error: true
+      - name: Per-file durations
+        if: always()
+        run: |
+          jq -r '.testResults[] | [((.endTime - .startTime)/1000 | tostring), .status, (.name | sub(".*/packages/"; ""))] | @tsv' vitest.json | sort -rn | head -40
+          echo '--- failures'
+          jq -r '.testResults[] | .assertionResults[] | select(.status=="failed") | .ancestorTitles[0] + " > " + .title' vitest.json
+          jq -r '.testResults[] | select(.status=="failed") | .name + ": " + (.message // "")' vitest.json | cut -c1-400
+          echo '--- totals'
+          jq '{numTotalTests, numPassedTests, numFailedTests, numPendingTests, startTime}' vitest.json
