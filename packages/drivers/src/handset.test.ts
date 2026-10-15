@@ -734,6 +734,9 @@ describe('HandsetDriver', () => {
       text('NOISE', 18, 100, 52),
       text('blue · +3 dB/oct', 18, 119, 104),
       { type: 'Button', frame: { x: 338, y: 104, width: 46, height: 26 } },
+      // The knob draws its color and slope at its centre.
+      text('blue', 186, 420, 30),
+      text('+3 dB/oct', 170, 440, 62),
       ...['brown', 'pink', 'white', 'blue', 'violet'].map((label, index) => ({
         type: 'Button',
         label,
@@ -788,21 +791,74 @@ describe('HandsetDriver', () => {
     expect(x).toBeDefined();
     expect(eqDrawn.some((area) => within(area, x!, y!))).toBe(false);
     expect(onElement(eq, x!, y!)).toBe(false);
+    // In the gap between a label and its value: on the carrier row, between "carrier" and "200 Hz".
+    expect(y).toBeGreaterThanOrEqual(630);
+    expect(y).toBeLessThanOrEqual(643);
+    expect(x).toBeGreaterThan(68);
+    expect(x).toBeLessThan(330);
     // The finger stays inside the scroll view.
     expect(distance).toBeGreaterThanOrEqual(60);
     expect(y! - distance!).toBeGreaterThanOrEqual(54);
   });
 
-  it('starts a scroll with no ref away from the orb knob at the centre of the screen', async () => {
-    const { driver, swipe } = looking(noise);
-    expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
+  it('looks past a named scroll view that covers the area, as Android lists a RecyclerView with an id', async () => {
+    const named: HandsetTree = {
+      ...eq,
+      elements: [
+        { type: 'ScrollView', id: 'eq-scroll', frame: { x: 0, y: 54, width: 402, height: 730 } },
+        ...eq.elements.slice(1),
+      ],
+    };
+    const { driver, swipe } = looking(named);
+    const result = await driver.act({ kind: 'scroll', direction: 'down' });
+    expect(result.note).toBeUndefined();
     const { x, y } = swipe()!;
-    expect(x).toBeDefined();
-    expect(noiseDrawn.some((area) => within(area, x!, y!))).toBe(false);
-    expect(onElement(noise, x!, y!)).toBe(false);
+    expect(eqDrawn.some((area) => within(area, x!, y!))).toBe(false);
+    expect(y).toBeGreaterThanOrEqual(630);
+    expect(y).toBeLessThanOrEqual(643);
   });
 
-  it('keeps a scroll off a slider in the tree, and off a point this session dragged', async () => {
+  it('starts a scroll with no ref away from the orb knob at the centre of the screen, in every direction', async () => {
+    for (const direction of ['down', 'up', 'left', 'right'] as const) {
+      const { driver, swipe } = looking(noise);
+      expect((await driver.act({ kind: 'scroll', direction })).ok).toBe(true);
+      const { x, y } = swipe()!;
+      expect(x).toBeDefined();
+      expect(noiseDrawn.some((area) => within(area, x!, y!))).toBe(false);
+    }
+  });
+
+  /** Hum's nature tab: each row is a label, then a slider drawn to the end of the row. */
+  const nature: HandsetTree = {
+    ...eq,
+    elements: [
+      { type: 'ScrollView', frame: { x: 0, y: 54, width: 402, height: 730 } },
+      text('NATURE', 18, 100, 60),
+      text('3 active', 250, 100, 60),
+      { type: 'Button', frame: { x: 338, y: 94, width: 46, height: 26 } },
+      ...['rain', 'stream', 'ocean', 'thunder', 'wind', 'fire', 'birds', 'crickets', 'frogs', 'cafe', 'train'].map(
+        (label, index) => text(label, 18, 160 + index * 50, 90),
+      ),
+      ...eq.elements.slice(-3),
+    ],
+  };
+  const natureDrawn: Area[] = Array.from({ length: 11 }, (_, index) => ({
+    x: 124,
+    y: 154 + index * 50,
+    width: 260,
+    height: 24,
+  }));
+
+  it("starts a scroll on a label, not on the slider drawn beside it on Hum's nature tab", async () => {
+    const { driver, swipe } = looking(nature);
+    for (const direction of ['down', 'up'] as const) {
+      expect((await driver.act({ kind: 'scroll', direction })).ok).toBe(true);
+    }
+    const { x, y } = swipe()!;
+    expect(natureDrawn.some((area) => within(area, x!, y!))).toBe(false);
+  });
+
+  it('keeps a scroll off a slider in the tree', async () => {
     const slider: HandsetTree = {
       ...eq,
       elements: [
@@ -812,18 +868,81 @@ describe('HandsetDriver', () => {
         text('balance', 18, 700, 60),
       ],
     };
-    const { driver, swipe, calls } = looking(slider);
+    const { driver, swipe } = looking(slider);
     expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
-    const first = swipe()!;
-    expect(first.y! < 580 || first.y! > 634 || first.x! < 80).toBe(true);
-    // A drag on the balance row's drawn control: the next scroll stays off it too.
-    expect((await driver.act({ kind: 'drag', from: { x: 200, y: 706 }, direction: 'right', distance: 80 })).ok).toBe(
+    const { x, y } = swipe()!;
+    expect(within({ x: 82, y: 582, width: 306, height: 50 }, x!, y!)).toBe(false);
+  });
+
+  it('keeps a scroll off a place this session dragged, while the layout holds', async () => {
+    const rate: HandsetTree = {
+      ...eq,
+      elements: [
+        { type: 'ScrollView', frame: { x: 0, y: 54, width: 402, height: 730 } },
+        text('rate', 18, 600, 60),
+        text('0.2 Hz', 330, 600, 52),
+      ],
+    };
+    const { driver, swipe, calls } = looking(rate);
+    expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
+    const free = swipe()!;
+    // The gap between "rate" and its value, nearest the ideal start.
+    expect([free.x, free.y]).toEqual([200, 606]);
+    expect((await driver.act({ kind: 'drag', from: { x: 200, y: 606 }, direction: 'right', distance: 80 })).ok).toBe(
       true,
     );
     calls.length = 0;
+    await driver.act({ kind: 'scroll', direction: 'down' });
+    const kept = swipe()!;
+    expect(within({ x: 168, y: 574, width: 64, height: 64 }, kept.x!, kept.y!)).toBe(false);
+    // The screen scrolled: the drawn control moved with it, and the place is forgotten.
+    const scrolled = { ...rate, elements: [...rate.elements, text('footer', 18, 760, 60)] };
+    (driver as unknown as { lastTree: HandsetTree }).lastTree = scrolled;
+    calls.length = 0;
+    await driver.act({ kind: 'scroll', direction: 'down' });
+    expect([swipe()!.x, swipe()!.y]).toEqual([200, 606]);
+  });
+
+  it('chooses against the tree that the last settle read', async () => {
+    const { calls, exec } = fake({ tree: envelope('tree', noise) });
+    const driver = new HandsetDriver('ios', { lease: 'ls_1' }, exec);
+    await driver.settle({ timeoutMs: 1000, intervalMs: 0 });
     expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
-    const second = swipe()!;
-    expect(within({ x: 176, y: 682, width: 128, height: 48 }, second.x!, second.y!)).toBe(false);
+    const call = calls.find((args) => args[0] === 'swipe')!;
+    const [x, y] = [Number(call[call.indexOf('--x') + 1]), Number(call[call.indexOf('--y') + 1])];
+    expect(noiseDrawn.some((area) => within(area, x, y))).toBe(false);
+  });
+
+  it('scales to an Android screen in pixels', async () => {
+    const scale = 1080 / 402;
+    const px = (area: Area): Area => ({
+      x: area.x * scale,
+      y: area.y * scale,
+      width: area.width * scale,
+      height: area.height * scale,
+    });
+    const android: HandsetTree = {
+      w: 1080,
+      h: 2348,
+      unit: 'tap',
+      elements: eq.elements.map((node) => ({ ...node, frame: node.frame && px(node.frame) })),
+    };
+    const { calls, exec } = fake({});
+    const driver = new HandsetDriver('android', { lease: 'ls_1' }, exec);
+    Object.assign(driver as unknown as Record<string, unknown>, {
+      lastTree: android,
+      lastObservation: {
+        elements: handsetElements(android, 'android'),
+        viewport: { width: 1080, height: 2348, scale: 1 },
+      },
+    });
+    expect((await driver.act({ kind: 'scroll', direction: 'down' })).ok).toBe(true);
+    const call = calls.find((args) => args[0] === 'swipe')!;
+    const [x, y, distance] = ['--x', '--y', '--distance'].map((flag) => Number(call[call.indexOf(flag) + 1]));
+    expect(eqDrawn.map(px).some((area) => within(area, x!, y!))).toBe(false);
+    // Handset's Android travel is 30% of the screen, and the finger stays inside the scroll view.
+    expect(distance).toBeLessThanOrEqual(Math.round(0.3 * 2348));
+    expect(y! - distance!).toBeGreaterThanOrEqual(54 * scale);
   });
 
   it('scrolls a list from a row when the list has no empty space, and says so', async () => {
@@ -842,7 +961,7 @@ describe('HandsetDriver', () => {
     const result = await driver.act({ kind: 'scroll', direction: 'down' });
     expect(result.ok).toBe(true);
     expect(swipe()!.x).toBeDefined();
-    expect(result.note).toMatch(/^The scroll started on "Ride \d+": the area to scroll has no empty space\.$/);
+    expect(result.note).toMatch(/^The scroll started on "Ride \d+": the area to scroll has no empty space or text\.$/);
   });
 
   it('refuses a scroll when every point is on a control that follows a drag, and says how to scroll instead', async () => {

@@ -95,7 +95,7 @@ const defaultExec =
 const STATUS_BAR = { ios: 54, android: 24 } as const;
 /** Containers a swipe scrolls, and controls that follow a drag, which a scroll must not start on. */
 const SCROLLER = /ScrollView|Table|CollectionView|WebView|RecyclerView|ListView|GridView|ViewPager/i;
-const DRAGGABLE = /Slider|Switch|Toggle|Picker|Adjustable|SeekBar|RatingBar|MapView/i;
+const DRAGGABLE = /Slider|Switch|Toggle|Picker|Adjustable|SeekBar|RatingBar|SegmentedControl|MapView|^Map$/i;
 /** How far round a point this session tapped or dragged a scroll stays away, on a 402-point phone. */
 const TOUCHED = 24;
 const TEXTBOX = /TextField|SecureTextField|SearchField|TextView|EditText/i;
@@ -299,8 +299,8 @@ export class HandsetDriver implements Driver {
   private lastObservation?: Observation;
   /** The newest tree read, by an observation or a settle: what a scroll's start is chosen against. */
   private lastTree?: HandsetTree;
-  /** Where this session tapped a bare point or dragged: a drawn control no tree lists. */
-  private touched: UiElement['box'][] = [];
+  /** Where this session tapped a bare point or began a drag: a drawn control no tree lists, on that layout. */
+  private touched: Array<{ box: UiElement['box']; tree?: HandsetTree }> = [];
   /** Milliseconds since the epoch of the newest log line already reported. */
   private lastLogAt = 0;
   private readonly exec: HandsetExec;
@@ -429,21 +429,19 @@ export class HandsetDriver implements Driver {
     this.onScreen(locator.point, 'tapped');
     await this.call('tap', ['--x', String(locator.point.x), '--y', String(locator.point.y)]);
     // A bare point, with no label to try, is a control the tree does not list.
-    if (!locator.testId && !locator.name && !locator.text) this.touch(locator.point, locator.point);
+    if (!locator.testId && !locator.name && !locator.text) this.touch(locator.point);
     return { degraded: true };
   }
 
-  /** Remember the path of a bare tap or a drag, so a later scroll does not start on that control. */
-  private touch(from: { x: number; y: number }, to: { x: number; y: number }): void {
+  /**
+   * Remember where a bare tap or a drag began, so a later scroll does not
+   * start on that control. It holds while the layout does: a scroll or a new
+   * screen moves the control, and the place is forgotten.
+   */
+  private touch(at: { x: number; y: number }): void {
     const pad = TOUCHED * ((this.lastObservation?.viewport.width ?? 402) / 402);
-    const [x, y] = [Math.min(from.x, to.x), Math.min(from.y, to.y)];
-    const box = {
-      x: x - pad,
-      y: y - pad,
-      width: Math.abs(to.x - from.x) + 2 * pad,
-      height: Math.abs(to.y - from.y) + 2 * pad,
-    };
-    this.touched = [...this.touched, box].slice(-16);
+    const box = { x: at.x - pad, y: at.y - pad, width: 2 * pad, height: 2 * pad };
+    this.touched = [...this.touched, { box, tree: this.lastTree }].slice(-16);
   }
 
   /**
@@ -469,14 +467,18 @@ export class HandsetDriver implements Driver {
     const draggable = tree.elements.flatMap((node) =>
       node.frame && DRAGGABLE.test(node.type ?? '') ? [node.frame] : [],
     );
+    const touched = this.touched
+      .filter((place) => place.tree && sameLayout(place.tree, tree))
+      .map((place) => place.box);
     return scrollStart({
       screen,
-      region: region ?? { x: 0, y: 0, ...screen },
+      region,
       direction,
       // Handset's own defaults: 400 points on iOS, 30% of the screen on Android.
       travel: this.platform === 'ios' ? 400 * unit : 0.3 * (vertical ? tree.h : tree.w),
       elements: handsetElements(tree, this.platform),
-      avoid: [...draggable, ...this.touched],
+      avoid: [...draggable, ...touched],
+      // iOS's status bar, scaled: on Android about 145 px, a little more than its own bar.
       top: STATUS_BAR.ios * unit,
     });
   }
@@ -517,13 +519,17 @@ export class HandsetDriver implements Driver {
           const args = ['--direction', finger];
           if (start && 'none' in start) {
             throw new Refused(
-              `Not scrolled: ${start.none}. To scroll from a point you choose on empty background, use drag in the finger's direction.`,
+              `Not scrolled: ${start.none}. To scroll ${action.direction}, drag ${finger} from a point on empty background.`,
             );
           }
           if (start) {
             args.push('--x', String(start.x), '--y', String(start.y), '--distance', String(start.distance));
-            if (start.on)
-              note = `The scroll started on ${elementTitle(start.on)}: the area to scroll has no empty space.`;
+            if (start.on) {
+              note = `The scroll started on ${elementTitle(start.on)}: the area to scroll has no empty space or text.`;
+            }
+          } else if (at) {
+            // No tree read yet: start on the element, as before.
+            args.push('--x', String(at.x), '--y', String(at.y));
           }
           await this.call('swipe', args);
           break;
@@ -556,12 +562,7 @@ export class HandsetDriver implements Driver {
             '--distance',
             String(distance),
           ]);
-          const sign = direction === 'up' || direction === 'left' ? -1 : 1;
-          const vertical = direction === 'up' || direction === 'down';
-          this.touch(from, {
-            x: from.x + (vertical ? 0 : sign * distance),
-            y: from.y + (vertical ? sign * distance : 0),
-          });
+          this.touch(from);
           break;
         }
         case 'back': {
