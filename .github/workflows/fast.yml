@@ -9,34 +9,81 @@ permissions:
   contents: read
   actions: read
 
+env:
+  HERMETIC_EXCLUDES: --exclude packages/capture/src/font-audit.test.ts --exclude packages/capture/src/probe.test.ts --exclude packages/drivers/src/dom.test.ts --exclude packages/drivers/src/api.test.ts --exclude packages/drivers/src/recording.test.ts --exclude packages/agents/src/api-replay.test.ts
+
 jobs:
-  fast:
+  tsc:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - run: command -v node; node --version; ls /opt/hostedtoolcache/node; command -v pnpm || true
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
+      - run: time pnpm install --frozen-lockfile --prefer-offline
+      - name: noCheck cold
+        run: time pnpm exec tsc --build --noCheck
+        continue-on-error: true
+      - run: pnpm exec tsc --build --clean; du -sh packages/*/dist 2>/dev/null | tail -3 || true
+      - name: full cold
+        run: time pnpm exec tsc --build
+      - run: du -ch packages/*/dist packages/*/*.tsbuildinfo 2>/dev/null | tail -1; ls packages/core; ls packages/core/dist | grep -i buildinfo || true; find packages -name '*.tsbuildinfo' -not -path '*/node_modules/*' | head
+      - name: warm with fresh mtimes and one edit
+        run: |
+          find packages -path '*/src/*' -name '*.ts' -not -path '*/node_modules/*' -exec touch {} +
+          echo '// edit' >> packages/agents/src/explorer.ts
+          time pnpm exec tsc --build
+      - name: warm with fresh mtimes and one edit in core
+        run: |
+          find packages -path '*/src/*' -name '*.ts' -not -path '*/node_modules/*' -exec touch {} +
+          echo 'export const fastCiProbe = 1;' >> packages/core/src/index.ts
+          time pnpm exec tsc --build
+
+  vitest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: time pnpm install --frozen-lockfile --prefer-offline
       - run: time pnpm exec tsc --build
-      - name: full suite json
-        run: time pnpm exec vitest run --reporter=dot --reporter=json --outputFile=vitest.json
+      - name: hermetic no-isolate
+        run: time pnpm exec vitest run --no-isolate $HERMETIC_EXCLUDES --exclude packages/agents/src/review.test.ts
         continue-on-error: true
-      - name: Per-test durations
-        if: always()
-        run: |
-          jq -r '.testResults[] | (.name | sub(".*/packages/"; "")) as $f | .assertionResults[] | [(.duration // 0 | floor | tostring), .status, $f, ((.ancestorTitles | join(" > ")) + " > " + .title)] | @tsv' vitest.json | sort -rn | head -50
-          echo '--- review.test.ts by describe'
-          jq -r '.testResults[] | select(.name | endswith("review.test.ts")) | .assertionResults | group_by(.ancestorTitles[0]) | .[] | [((map(.duration // 0) | add) | floor | tostring), (.[0].ancestorTitles[0]), (length | tostring)] | @tsv' vitest.json | sort -rn
-      - name: hermetic forks
-        run: time pnpm exec vitest run --reporter=dot --exclude 'packages/capture/src/font-audit.test.ts' --exclude 'packages/capture/src/probe.test.ts' --exclude 'packages/drivers/src/dom.test.ts' --exclude 'packages/drivers/src/api.test.ts' --exclude 'packages/drivers/src/recording.test.ts' --exclude 'packages/agents/src/api-replay.test.ts' --exclude 'packages/agents/src/review.test.ts'
+      - name: hermetic no-isolate again
+        run: time pnpm exec vitest run --no-isolate $HERMETIC_EXCLUDES --exclude packages/agents/src/review.test.ts
         continue-on-error: true
-      - name: hermetic threads
-        run: time pnpm exec vitest run --reporter=dot --pool=threads --exclude 'packages/capture/src/font-audit.test.ts' --exclude 'packages/capture/src/probe.test.ts' --exclude 'packages/drivers/src/dom.test.ts' --exclude 'packages/drivers/src/api.test.ts' --exclude 'packages/drivers/src/recording.test.ts' --exclude 'packages/agents/src/api-replay.test.ts' --exclude 'packages/agents/src/review.test.ts'
+      - name: hermetic maxWorkers 4
+        run: time pnpm exec vitest run --maxWorkers=4 --minWorkers=4 $HERMETIC_EXCLUDES --exclude packages/agents/src/review.test.ts
         continue-on-error: true
-      - name: tsc warm noop
-        run: time pnpm exec tsc --build
+      - name: hermetic with review, no-isolate
+        run: time pnpm exec vitest run --no-isolate $HERMETIC_EXCLUDES
+        continue-on-error: true
+      - name: hermetic with review, default
+        run: time pnpm exec vitest run $HERMETIC_EXCLUDES
+        continue-on-error: true
+      - name: review alone, verbose
+        run: time pnpm exec vitest run --reporter=verbose packages/agents/src/review.test.ts 2>&1 | grep -E '[0-9]{3,}ms|Duration|Tests ' | sed -E 's/\x1b\[[0-9;]*m//g' | sort -t' ' -k1 | tail -60
+        continue-on-error: true
+
+  deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: filtered install
+        run: time pnpm install --frozen-lockfile --prefer-offline --filter '!@bugpatrol/site'
+      - run: du -sh node_modules/.pnpm
+      - run: time pnpm check --error-on-warnings
+        continue-on-error: true
+      - run: time pnpm knip
+        continue-on-error: true
