@@ -248,6 +248,22 @@ export type IssueEvidence = {
 
 export type IssueStatus = 'new' | 'filed' | 'fixing' | 'fix-proposed' | 'fixed' | 'dismissed';
 
+/** An issue's finding on a publisher other than GitHub, which keeps `Issue.github`. */
+export type PublishedRef = {
+  /** The publisher's own id: a file name, a task id. */
+  id: string;
+  /** How a person names it: BUG-3, a file name. */
+  name: string;
+  url: string;
+  /** When Bugpatrol filed or linked it. */
+  at: string;
+  /** The directory or board it is on. A ref to another target does not count as filed there. */
+  target: string;
+  state: 'open' | 'fixed' | 'dismissed';
+  stateAt?: string;
+  checkedAt?: string;
+};
+
 export type Issue = {
   version: 1;
   id: string;
@@ -274,6 +290,8 @@ export type Issue = {
     stateAt?: string;
     checkedAt?: string;
   };
+  /** The finding on each other publisher, by its `agents.publisher.use` name. */
+  published?: Partial<Record<string, PublishedRef>>;
   fixRejected?: { pr: number; url: string; at: string };
   publishSkipped?: { reason: string; at: string };
   fixId?: string;

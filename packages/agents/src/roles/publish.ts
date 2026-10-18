@@ -5,6 +5,7 @@ import {
   type Candidate,
   type FixProposal,
   type Issue,
+  issueMinSeverity,
   judgedRetests,
   paths,
 } from '@bugpatrol/core';
@@ -122,7 +123,7 @@ async function matchFiled(workspace: Workspace, items: Item[], findings: Finding
 }
 
 export async function runPublisher(root: string, config: BugpatrolConfig, deps: Deps = {}): Promise<PublishOutcome[]> {
-  const publisher = deps.publisher ?? publisherFor(root, config, { gh: deps.gh });
+  const publisher = deps.publisher ?? publisherFor(root, config, { gh: deps.gh, onLog: deps.onLog });
   if (!publisher && !deps.dryRun) return [];
   const label = publisher?.label ?? 'GitHub';
   const workspace = new Workspace(root);
@@ -149,7 +150,7 @@ export async function runPublisher(root: string, config: BugpatrolConfig, deps: 
     if (
       !ref &&
       !['fixed', 'dismissed'].includes(issue.status) &&
-      rank[issue.severity] >= rank[config.agents.github.issueMinSeverity] &&
+      rank[issue.severity] >= rank[issueMinSeverity(config)] &&
       (!fix || ['declined', 'failed'].includes(fix.status) || prReady)
     )
       return [{ kind: 'issue' as const, issue, fix }];
@@ -404,7 +405,19 @@ export async function runPublisher(root: string, config: BugpatrolConfig, deps: 
               url = finding.url;
               name = finding.name;
               publisher!.link(item.issue, finding);
-              item.issue.status = 'filed';
+              // Another machine filed it first, and it is closed there: keep its state.
+              if (finding.state === 'dismissed')
+                await dismissByTracker(
+                  workspace,
+                  item.issue,
+                  label,
+                  `Dismissed on ${label} as ${finding.name}.`,
+                  finding.stateAt ?? new Date().toISOString(),
+                );
+              else if (finding.state === 'fixed') {
+                await publisher!.reopen(item.issue, await reopenEvidence(workspace, item.issue));
+                item.issue.status = 'filed';
+              } else item.issue.status = 'filed';
               await workspace.saveIssue(item.issue);
             }
             done.add(item.issue.id);

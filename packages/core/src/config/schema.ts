@@ -349,7 +349,7 @@ export const AGENT_CHECKS = [
 export type AgentCheck = (typeof AGENT_CHECKS)[number];
 
 /** Where the publish step files findings (`agents.publisher.use`). */
-export const PUBLISHERS = ['github'] as const;
+export const PUBLISHERS = ['github', 'file'] as const;
 export type PublisherName = (typeof PUBLISHERS)[number];
 
 export const agentsSchema = z
@@ -444,6 +444,18 @@ export const agentsSchema = z
     publisher: z
       .object({
         use: z.enum(PUBLISHERS).optional(),
+        /** A bug with no fix is filed at this severity or worse. Default: agents.github.issueMinSeverity. */
+        issueMinSeverity: z.enum(['cosmetic', 'minor', 'major', 'critical']).optional(),
+        /** `use: file`: one JSON file per finding, and its screenshots, in `dir`. */
+        file: z
+          .object({
+            /**
+             * Relative to the project root. The default is local and ignored by git. Point it at a shared or committed
+             * directory to share findings and dismissals across machines; the screenshots of the app go with them.
+             */
+            dir: z.string().min(1).default('.bugpatrol/runs/findings'),
+          })
+          .default({}),
       })
       .default({}),
     /** `bugpatrol review <pr>`. */
@@ -540,6 +552,11 @@ export const agentsSchema = z
     agents.publisher.use === 'github' ? { ...agents, github: { ...agents.github, enabled: true } } : agents,
   )
   .default({});
+
+/** The severity at or above which a bug with no fix is filed. */
+export function issueMinSeverity(config: { agents: AgentsConfig }): AgentsConfig['github']['issueMinSeverity'] {
+  return config.agents.publisher.issueMinSeverity ?? config.agents.github.issueMinSeverity;
+}
 
 /** The publisher this config selects, or undefined when nothing is published. */
 export function publisherOf(config: { agents: AgentsConfig }): PublisherName | undefined {

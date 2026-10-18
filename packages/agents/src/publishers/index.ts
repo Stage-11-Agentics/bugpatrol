@@ -1,6 +1,7 @@
 import { type BugpatrolConfig, type FixProposal, type Issue, type PublisherName, publisherOf } from '@bugpatrol/core';
 import { type Gh, ghFor } from '../github.js';
 import { Workspace } from '../workspace.js';
+import { FilePublisher } from './file.js';
 import { GitHubPublisher } from './github.js';
 
 /** What became of a finding on its tracker. Every state that is not closed counts as open. */
@@ -20,6 +21,10 @@ export type Finding = {
   stateAt?: string;
   /** Read back from the finding's hidden marker. Without them, nothing matches it to an issue. */
   fingerprints?: string[];
+  /** Why it was closed or dismissed, when the tracker says. */
+  reason?: string;
+  /** The tracker's status is not one Bugpatrol knows, such as a typo: the sync leaves the issue as it is. */
+  unknownState?: boolean;
 };
 
 export type Filed = {
@@ -91,10 +96,16 @@ export interface Publisher {
 }
 
 /** The publisher that the config selects (agents.publisher.use), or undefined when nothing is published. */
-export function publisherFor(root: string, config: BugpatrolConfig, deps: { gh?: Gh } = {}): Publisher | undefined {
+export function publisherFor(
+  root: string,
+  config: BugpatrolConfig,
+  deps: { gh?: Gh; onLog?: (message: string) => void } = {},
+): Publisher | undefined {
   switch (publisherOf(config)) {
     case 'github':
       return new GitHubPublisher(root, config, deps.gh ?? ghFor(config));
+    case 'file':
+      return new FilePublisher(root, config, { onLog: deps.onLog });
     default:
       return undefined;
   }
@@ -108,7 +119,7 @@ export async function closeFinding(
   opts: { publisher?: Publisher; gh?: Gh; evidence?: string; onLog?: (message: string) => void } = {},
 ): Promise<void> {
   const onLog = opts.onLog ?? console.error;
-  const publisher = opts.publisher ?? publisherFor(root, config, { gh: opts.gh });
+  const publisher = opts.publisher ?? publisherFor(root, config, { gh: opts.gh, onLog });
   if (!publisher?.ref(issue)) return;
   try {
     const ready = await publisher.ready();

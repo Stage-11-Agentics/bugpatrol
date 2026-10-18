@@ -61,7 +61,10 @@ agents:
     assetsBranch: bugpatrol-assets # the orphan branch that holds report images
     prScope: app                # optional: the scope in PR titles
   publisher:
-    use: github                 # optional: where findings go; unset = GitHub when agents.github is on, else nowhere
+    use: github                 # optional: github | file; unset = GitHub when agents.github is on, else nowhere
+    issueMinSeverity: major     # optional: file a bug with no fix at this severity or worse; default agents.github's
+    file:
+      dir: .bugpatrol/runs/findings # use: file: one JSON file per finding, with its screenshots
   review:
     name: web                   # optional: tells two reviews of one pull request apart, each with its own review and check run
     claims: false               # the claim check of `bugpatrol review`: test what the pull request says it does
@@ -84,6 +87,26 @@ agents:
     cycles: 0                   # 0 = run until stopped
     pull: origin/main           # remote/branch to pull before each cycle; false = no pull
 ```
+
+## Where findings go
+
+`agents.publisher.use` names the publisher, and Bugpatrol publishes to that one place. A config that names a
+publisher other than GitHub never runs `gh`: review, CI, and the GitHub sync refuse for it.
+
+| `use` | Findings | Dedupe across machines | Dismissing one |
+| --- | --- | --- | --- |
+| `github` | GitHub issues, screenshots on `agents.github.assetsBranch`, fixes as PRs | The publish judge reads the filed issues | Close it as not planned |
+| `file` | `<dir>/<fingerprint>.json`, screenshots in `<dir>/images/` | Each file lists its fingerprints | Set its `status` to `dismissed`, and `reason` |
+
+The publish step links a bug to a filed finding that has one of its fingerprints instead of filing it again. A
+finding that a person dismissed dismisses the bug, and its fingerprints go into triage, so the judge does not file it
+again. A bug that comes back after its finding closed as fixed reopens it, with the evidence. `bugpatrol sync` reads
+each finding's state back. Bugpatrol never writes over a dismissal: a close or a reopen of a dismissed finding is
+refused, and the sync dismisses the bug instead.
+
+The default findings directory is local and ignored by git. To share findings and dismissals across machines, point
+`dir` at a shared or committed directory. Its screenshots are copies of the app's screens, so share them only where the
+app's screens may go.
 
 ## Setup and teardown commands
 

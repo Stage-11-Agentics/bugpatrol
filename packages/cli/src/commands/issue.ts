@@ -23,7 +23,13 @@ export async function runIssueCommand(
     const prs = new Map((await workspace.listFixes()).filter((fix) => fix.pr).map((fix) => [fix.issueId, fix.pr!]));
     for (const issue of issues.sort(bySeverity)) {
       const pr = prs.get(issue.id);
-      const github = [issue.github && `#${issue.github.number}`, pr && `PR #${pr.number}`].filter(Boolean).join(' ');
+      const github = [
+        issue.github && `#${issue.github.number}`,
+        ...Object.values(issue.published ?? {}).map((ref) => ref?.name),
+        pr && `PR #${pr.number}`,
+      ]
+        .filter(Boolean)
+        .join(' ');
       log(
         `${issue.id}  ${issue.severity.padEnd(8)} ${issue.status.padEnd(12)} x${String(issue.occurrences).padEnd(3)} ${github.padEnd(15)} ${issue.title}`,
       );
@@ -31,7 +37,7 @@ export async function runIssueCommand(
     if (issues.length === 0) log('No issues. Run `bugpatrol explore`, then `bugpatrol judge`.');
     else
       log(
-        `\n${issues.length} issue(s). Status: new = filed by the judge, not on GitHub; filed = on GitHub; ` +
+        `\n${issues.length} issue(s). Status: new = filed by the judge, not published; filed = published; ` +
           'fix-proposed = a fix waits for review; fixed; dismissed.',
       );
     return;
