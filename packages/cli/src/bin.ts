@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from 'node:fs';
-import { cleanWorktrees, syncGitHub } from '@bugpatrol/agents';
+import { cleanWorktrees, syncFindings } from '@bugpatrol/agents';
 import {
   BugpatrolError,
   ExitCode,
@@ -9,6 +9,7 @@ import {
   loadConfig,
   moveRoutines,
   paths,
+  publisherOf,
 } from '@bugpatrol/core';
 import { startDashboard } from '@bugpatrol/dashboard';
 import { configArgs, legacyEnv, withDefaultCommand } from './argv.js';
@@ -136,10 +137,12 @@ try {
       break;
     }
 
+    case 'sync':
     case 'github': {
-      if (args.length !== 1 || args[0] !== 'sync') throw new Error('Use bugpatrol github sync');
+      if (command === 'sync' ? args.length !== 0 : args.length !== 1 || args[0] !== 'sync')
+        throw new Error('Use bugpatrol sync');
       const config = readConfig();
-      const result = await syncGitHub(root, config, { onLog: console.error });
+      const result = await syncFindings(root, config, { onLog: console.error });
       await cleanWorktrees(root, config, { onLog: console.error });
       process.stdout.write(`Synced: ${result.changed.length} change(s)\n`);
       for (const id of result.changed) process.stdout.write(`${id}\n`);
@@ -164,13 +167,13 @@ try {
       }
       const config = optionalConfig();
       let timer: ReturnType<typeof setInterval> | undefined;
-      if (config?.agents.github.enabled) {
+      if (config && publisherOf(config)) {
         const sync = () =>
-          void syncGitHub(root, config, { onLog: console.error }).catch((error) =>
-            console.error(`GitHub sync failed: ${String(error)}`),
+          void syncFindings(root, config, { onLog: console.error }).catch((error) =>
+            console.error(`Sync failed: ${String(error)}`),
           );
-        await syncGitHub(root, config, { onLog: console.error }).catch((error) =>
-          console.error(`GitHub sync failed: ${String(error)}`),
+        await syncFindings(root, config, { onLog: console.error }).catch((error) =>
+          console.error(`Sync failed: ${String(error)}`),
         );
         timer = setInterval(sync, 5 * 60_000);
         timer.unref();

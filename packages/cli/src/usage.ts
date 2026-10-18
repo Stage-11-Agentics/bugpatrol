@@ -26,7 +26,7 @@ Agents
   bugpatrol promote <pr> <claim>...       keep proven claim routines of a merged PR as routines
   bugpatrol publish [--issue <id>] [--dry-run]
   bugpatrol ci [--issue <id>] [--wait]
-  bugpatrol github sync
+  bugpatrol sync                          read each filed finding's state back (= bugpatrol github sync)
   bugpatrol worktrees clean
   bugpatrol [--once] [--force]            the patrol: explore, judge, fix, retest, publish (= bugpatrol patrol)
   bugpatrol replay <routine-id>
@@ -123,8 +123,10 @@ export const COMMAND_HELP: Record<string, string> = {
   <claim>         a claim id from the review, for example claim-1
 `,
   publish: `bugpatrol publish [--issue <id>]... [--dry-run]
-  Open a draft PR for each fix, and a GitHub issue for each bug at agents.github.issueMinSeverity or worse with no fix.
-  Needs agents.github.enabled: true and a logged-in gh CLI.
+  File each bug at agents.github.issueMinSeverity or worse with no fix on the publisher that agents.publisher.use
+  names, and open a draft PR for each fix. GitHub is the publisher when agents.github.enabled is on, and it needs a
+  logged-in gh CLI. A bug whose fingerprint is already filed is linked to that finding, not filed again; a finding
+  dismissed there dismisses the bug here.
   --dry-run       write the reports to .bugpatrol/runs/publish/, and open nothing
   --issue <id>    publish this issue only
 `,
@@ -143,8 +145,13 @@ export const COMMAND_HELP: Record<string, string> = {
   --once          run one cycle, then stop
   --force         explore and judge in the first cycle also when the commit did not change
 `,
-  github: `bugpatrol github sync
-  Read the state of each PR and issue from GitHub. A closed PR becomes a lesson. An issue closed as not planned becomes a dismissal.
+  sync: `bugpatrol sync      (the same as: bugpatrol github sync)
+  Read the state of each filed finding back from the publisher. A dismissed finding becomes a dismissal, a closed one
+  a fix, and a reopened one is filed again. On GitHub, a closed PR becomes a lesson.
+`,
+  github: `bugpatrol sync      (the same as: bugpatrol github sync)
+  Read the state of each filed finding back from the publisher. A dismissed finding becomes a dismissal, a closed one
+  a fix, and a reopened one is filed again. On GitHub, a closed PR becomes a lesson.
 `,
   issue: `bugpatrol issue list | dismiss <id> --reason "..." [--by name] | reopen <id>
   List the issues, worst first, or change the state of one issue.

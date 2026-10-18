@@ -14,10 +14,11 @@ import {
   type RoutineStep,
 } from '@bugpatrol/core';
 import { type Driver, createDriver as makeDriver } from '@bugpatrol/drivers';
-import { closeOnGitHub } from '../github.js';
+import { type Gh, ghFor } from '../github.js';
 import { readGuide } from '../guide.js';
 import { startApp } from '../lifecycle.js';
 import { explorerRetestSystem, judgeRetestSystem } from '../prompts.js';
+import { closeFinding } from '../publishers/index.js';
 import { createRuntime as makeRuntime } from '../runtime/index.js';
 import { AgentSession } from '../session.js';
 import { lessonTools } from '../tools/memory.js';
@@ -340,13 +341,11 @@ async function defaultBranch(repo: string): Promise<string> {
   }
 }
 
-async function merged(fix: FixProposal, branch: string): Promise<boolean> {
+async function merged(fix: FixProposal, branch: string, gh: Gh): Promise<boolean> {
   if (fix.pr) {
     try {
-      const { stdout } = await exec('gh', ['pr', 'view', fix.pr.url, '--json', 'state', '-q', '.state'], {
-        cwd: fix.repo,
-      });
-      return stdout.trim() === 'MERGED';
+      const state = await gh(['pr', 'view', fix.pr.url, '--json', 'state', '-q', '.state'], { cwd: fix.repo });
+      return state === 'MERGED';
     } catch {
       /* gh is unavailable; check git below. */
     }
@@ -380,7 +379,10 @@ export async function recheckMerged(
     const issue = await workspace.readIssue(fix.issueId);
     if (!issue || !['new', 'filed', 'fixing', 'fix-proposed'].includes(issue.status)) continue;
     const branch = await defaultBranch(fix.repo);
-    if (!(fix.pr?.state ? fix.pr.state === 'merged' : await (deps.isMerged?.(fix) ?? merged(fix, branch)))) continue;
+    if (
+      !(fix.pr?.state ? fix.pr.state === 'merged' : await (deps.isMerged?.(fix) ?? merged(fix, branch, ghFor(config))))
+    )
+      continue;
     const result = await retestFix(root, config, issue, fix, (fix.retests?.length ?? 0) + 1, deps, { build: 'main' });
     fix.retests = [...(fix.retests ?? []), result];
     await workspace.saveFix(fix);
@@ -396,7 +398,7 @@ export async function recheckMerged(
         },
       };
       await workspace.saveIssue(fixedIssue);
-      await closeOnGitHub(root, config, fixedIssue, undefined, deps.onLog);
+      await closeFinding(root, config, fixedIssue, { evidence: `Recheck: ${result.reason}`, onLog: deps.onLog });
       closed.push(issue.id);
     }
     if (result.outcome === 'fixed' || result.outcome === 'not-fixed') {

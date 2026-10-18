@@ -60,6 +60,8 @@ agents:
     labels: [bugpatrol]
     assetsBranch: bugpatrol-assets # the orphan branch that holds report images
     prScope: app                # optional: the scope in PR titles
+  publisher:
+    use: github                 # optional: where findings go; unset = GitHub when agents.github is on, else nowhere
   review:
     name: web                   # optional: tells two reviews of one pull request apart, each with its own review and check run
     claims: false               # the claim check of `bugpatrol review`: test what the pull request says it does

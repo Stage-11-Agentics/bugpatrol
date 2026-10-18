@@ -7,6 +7,8 @@ export type ReportInput = {
   candidates: Candidate[];
   fix?: FixProposal;
   imageUrl: (workspacePath: string) => string | undefined;
+  /** How an image shows in the report. Default: an HTML img tag. */
+  renderImage?: (url: string, width: number) => string;
   redact: (text: string) => string;
   closes?: number;
 };
@@ -14,8 +16,11 @@ export type ReportInput = {
 /** Full GitHub report. The caller owns image upload; this function only formats text. */
 export function buildReport(input: ReportInput): string {
   const { issue, fix, kind, imageUrl } = input;
-  const image = (path?: string, width = 320) =>
-    path && imageUrl(path) ? `<img src="${imageUrl(path)}" width="${width}">` : '';
+  const render = input.renderImage ?? ((url: string, width: number) => `<img src="${url}" width="${width}">`);
+  const image = (path?: string, width = 320) => {
+    const url = path && imageUrl(path);
+    return url ? render(url, width) : '';
+  };
   const screens = [
     { screenId: issue.screenId, path: issue.evidence.screenshot },
     ...input.candidates.map((candidate) => ({ screenId: candidate.screenId, path: candidate.evidence.screenshot })),

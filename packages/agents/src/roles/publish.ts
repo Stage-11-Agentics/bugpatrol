@@ -8,31 +8,32 @@ import {
   judgedRetests,
   paths,
 } from '@bugpatrol/core';
-import {
-  createIssue,
-  createPr,
-  defaultGh,
-  ensureAssetsBranch,
-  ensureLabels,
-  type Gh,
-  ghReady,
-  listFiled,
-  resolveRepo,
-  uploadImage,
-} from '../github.js';
-import { buildPrTitle, isConventional, PR_TYPES, templateScope } from '../pr-title.js';
+import type { Gh } from '../github.js';
+import { buildPrTitle, PR_TYPES, templateScope } from '../pr-title.js';
 import { judgePublishSystem } from '../prompts.js';
+import { type Filed, type Finding, type Publisher, publisherFor } from '../publishers/index.js';
 import { buildReport } from '../report.js';
 import { createRuntime as makeRuntime } from '../runtime/index.js';
 import { AgentSession } from '../session.js';
 import type { Tool } from '../types.js';
 import { Vars } from '../vars.js';
-import { lessonsFor, Workspace } from '../workspace.js';
+import { dismissByTracker, lessonsFor, Workspace } from '../workspace.js';
 
-export type PublishOutcome = { issueId: string; kind: 'pr' | 'issue' | 'skipped'; url?: string; reason?: string };
+/**
+ * `linked`: the publisher already had a finding with the issue's fingerprint.
+ * `reopened`: a regression reopened its closed finding.
+ */
+export type PublishOutcome = {
+  issueId: string;
+  kind: 'pr' | 'issue' | 'skipped' | 'linked' | 'reopened';
+  url?: string;
+  reason?: string;
+};
 type Item = { kind: 'pr' | 'issue'; issue: Issue; fix?: FixProposal };
 type Deps = {
   gh?: Gh;
+  /** The publisher to use instead of the one the config selects. */
+  publisher?: Publisher;
   createRuntime?: typeof makeRuntime;
   onLog?: (message: string) => void;
   onSession?: (session?: AgentSession) => void;
@@ -79,29 +80,85 @@ async function image(root: string, path?: string) {
   }
 }
 
+const day = (at: string) => at.slice(0, 10);
+
+/** The comment that reopens a finding: when Bugpatrol saw the problem again, and what it saw. */
+async function reopenEvidence(workspace: Workspace, issue: Issue): Promise<string> {
+  const last = (await candidatesFor(workspace, issue)).at(-1);
+  return [
+    `Reopened by Bugpatrol: the problem was seen again on ${day(issue.regression?.at ?? issue.lastSeenAt)}, after the finding was closed as fixed.`,
+    last ? `What it saw: ${last.summary}` : undefined,
+    `Seen ${issue.occurrences} time(s), first ${day(issue.firstSeenAt)}, last ${day(issue.lastSeenAt)}.`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+/** Open first, then the newest: the finding a person would expect a new sighting to join. */
+const preferred = (a: Finding, b: Finding) =>
+  Number(b.state === 'open') - Number(a.state === 'open') || (b.stateAt ?? '').localeCompare(a.stateAt ?? '');
+
+/**
+ * The publisher's findings that share a fingerprint with an issue that has no
+ * finding yet. A finding filed from another machine, or before this
+ * workspace's records, is linked rather than filed again.
+ */
+async function matchFiled(workspace: Workspace, items: Item[], findings: Finding[]): Promise<Map<string, Finding>> {
+  const byFingerprint = new Map<string, Finding>();
+  for (const finding of [...findings].sort(preferred).reverse())
+    for (const fp of finding.fingerprints ?? []) byFingerprint.set(fp, finding);
+  const matches = new Map<string, Finding>();
+  if (!byFingerprint.size) return matches;
+  for (const item of items) {
+    if (item.kind !== 'issue') continue;
+    const fingerprints = [
+      item.issue.fingerprint,
+      ...(await candidatesFor(workspace, item.issue)).map((candidate) => candidate.fingerprint),
+    ];
+    const found = fingerprints.flatMap((fp) => byFingerprint.get(fp) ?? []).sort(preferred);
+    if (found[0]) matches.set(item.issue.id, found[0]);
+  }
+  return matches;
+}
+
 export async function runPublisher(root: string, config: BugpatrolConfig, deps: Deps = {}): Promise<PublishOutcome[]> {
-  if (!config.agents.github.enabled && !deps.dryRun) return [];
+  const publisher = deps.publisher ?? publisherFor(root, config, { gh: deps.gh });
+  if (!publisher && !deps.dryRun) return [];
+  const label = publisher?.label ?? 'GitHub';
   const workspace = new Workspace(root);
-  const gh = deps.gh ?? defaultGh;
   const fixes = new Map((await workspace.listFixes()).map((fix) => [fix.issueId, fix]));
+  // A dry run with no publisher reads GitHub's record, as a GitHub run would.
+  const filedRef = (issue: Issue) => (publisher ? publisher.ref(issue) : issue.github);
+  const canOpenPr = deps.dryRun || Boolean(publisher?.openPr);
+  let waitingFixes = 0;
+  const regressions: Issue[] = [];
   const items: Item[] = (await workspace.listIssues()).flatMap((issue): Item[] => {
     if (deps.issueIds && !deps.issueIds.includes(issue.id)) return [];
     if (issue.status === 'dismissed' || issue.publishSkipped || issue.fixRejected) return [];
     const fix = fixes.get(issue.id);
     if (fix?.status === 'rejected') return [];
-    if (fix && !fix.pr && publishable(fix)) return [{ kind: 'pr' as const, issue, fix }];
+    const prReady = Boolean(fix && !fix.pr && publishable(fix));
+    if (prReady && canOpenPr) return [{ kind: 'pr' as const, issue, fix }];
+    if (prReady) waitingFixes++;
+    const ref = filedRef(issue);
+    if (!deps.dryRun && publisher?.ref(issue)?.state === 'fixed' && issue.status === 'new' && issue.regression) {
+      regressions.push(issue);
+      return [];
+    }
+    // With no forge for its PR, a fixed bug is still filed, so the team sees it.
     if (
-      !issue.github &&
+      !ref &&
       !['fixed', 'dismissed'].includes(issue.status) &&
       rank[issue.severity] >= rank[config.agents.github.issueMinSeverity] &&
-      (!fix || ['declined', 'failed'].includes(fix.status))
+      (!fix || ['declined', 'failed'].includes(fix.status) || prReady)
     )
       return [{ kind: 'issue' as const, issue, fix }];
     return [];
   });
-  if (!items.length) return [];
+  if (waitingFixes) deps.onLog?.(`${waitingFixes} verified fix(es) wait in the dashboard: ${label} cannot open PRs.`);
+  if (!items.length && !regressions.length) return [];
   if (!deps.dryRun) {
-    const ready = await ghReady(gh);
+    const ready = await publisher!.ready();
     if (!ready.ok) {
       const record = await workspace.startSession('judge');
       await workspace.endSession(record.id, { summary: ready.reason });
@@ -110,19 +167,85 @@ export async function runPublisher(root: string, config: BugpatrolConfig, deps: 
     }
   }
 
+  const outcomes: PublishOutcome[] = [];
+  let filed: Filed = { findings: [], lines: [] };
+  // The repo's own recent titles teach the judge its types and scopes.
+  let recentTitles: string[] = [];
+  if (!deps.dryRun && publisher) {
+    try {
+      recentTitles = (await publisher.titleStyle?.()) ?? [];
+    } catch {
+      /* Style hints are optional. */
+    }
+    try {
+      filed = await publisher.filed();
+    } catch (error) {
+      deps.onLog?.(`Could not read what ${label} has filed: ${String(error)}`);
+      // Without its list, a fingerprint publisher cannot tell a new bug from a filed one.
+      if (publisher.fingerprints) {
+        deps.onLog?.(`Filed nothing on ${label} in this run, so no bug is filed twice.`);
+        return outcomes;
+      }
+      /* GitHub's judge then compares only the local items. */
+    }
+    try {
+      // A finding with the issue's fingerprint is the same finding: link it, with no model.
+      const matches = await matchFiled(workspace, items, filed.findings);
+      const now = new Date().toISOString();
+      for (const item of items) {
+        const finding = matches.get(item.issue.id);
+        if (!finding) continue;
+        const { issue } = item;
+        publisher.link(issue, finding);
+        if (finding.state === 'dismissed')
+          await dismissByTracker(
+            workspace,
+            issue,
+            label,
+            `Dismissed on ${label} as ${finding.name}.`,
+            finding.stateAt ?? now,
+          );
+        else if (finding.state === 'fixed') {
+          // Seen after its finding closed as fixed: a regression, also when this machine never saw it fixed.
+          issue.regression = { at: now, fromStatus: 'fixed' };
+          regressions.push(issue);
+        } else issue.status = 'filed';
+        await workspace.saveIssue(issue);
+        // A fixed finding reopens below, and reports that.
+        if (finding.state !== 'fixed') outcomes.push({ issueId: issue.id, kind: 'linked', url: finding.url });
+      }
+      items.splice(0, items.length, ...items.filter((item) => !matches.has(item.issue.id)));
+      // A regression reopens its finding once. The judge already confirmed it, so no model is needed.
+      const reopened = new Set<string>();
+      for (const issue of regressions) {
+        const ref = publisher.ref(issue);
+        try {
+          if (ref && !reopened.has(ref.id)) await publisher.reopen(issue, await reopenEvidence(workspace, issue));
+          else if (ref) publisher.link(issue, { ...ref, state: 'open' });
+          if (ref) reopened.add(ref.id);
+          issue.status = 'filed';
+          await workspace.saveIssue(issue);
+          outcomes.push({ issueId: issue.id, kind: 'reopened', url: ref?.url });
+        } catch (error) {
+          deps.onLog?.(`${label} reopen of ${issue.id} failed: ${String(error)}`);
+        }
+      }
+    } catch (error) {
+      deps.onLog?.(`Linking to what ${label} has filed failed: ${String(error)}`);
+      return outcomes;
+    }
+  }
+  if (!items.length) return outcomes;
+
   const vars = new Vars(config.app.secrets);
   const record = await workspace.startSession('judge');
   const session = new AgentSession(root, config, vars, record.id, 'judge', undefined, deps.onLog);
   deps.onSession?.(session);
-  const outcomes: PublishOutcome[] = [];
   const done = new Set<string>();
   const runtime = (deps.createRuntime ?? makeRuntime)(config.agents.judge.use);
   let steps = 0;
   let costUsd = 0;
   let status: 'finished' | 'failed' = 'finished';
-  let resolved: Awaited<ReturnType<typeof resolveRepo>> | undefined;
-  let assetsReady = false;
-  let labelsReady = false;
   const get = (id: string) => items.find((item) => item.issue.id === id && !done.has(id));
   const pathsFor = (item: Item, candidates: Candidate[]) =>
     new Set(
@@ -137,43 +260,9 @@ export async function runPublisher(root: string, config: BugpatrolConfig, deps: 
       ].filter((path): path is string => Boolean(path)),
     );
   const defaultScope = config.agents.github.prScope ?? templateScope(config.agents.fixer.commitMessage);
-  // The repo's own recent titles teach the judge its types and scopes.
-  let recentTitles: string[] = [];
-  let filed: string[] = [];
-  if (!deps.dryRun) {
-    try {
-      resolved ??= await resolveRepo(gh, config, resolve(root, config.app.source));
-      recentTitles = (
-        await gh([
-          'pr',
-          'list',
-          '--repo',
-          resolved.repo,
-          '--state',
-          'merged',
-          '--limit',
-          '25',
-          '--json',
-          'title',
-          '-q',
-          '.[].title',
-        ])
-      )
-        .split('\n')
-        .filter(isConventional)
-        .slice(0, 10);
-    } catch {
-      /* Style hints are optional. */
-    }
-    try {
-      if (resolved) filed = await listFiled(gh, resolved.repo, config);
-    } catch {
-      /* Without the list, the judge compares only the local items. */
-    }
-  }
   try {
     await session.activity(`Publishing ${items.length} item(s)`, 0, runtime.label);
-    session.emit({ kind: 'session-start', summary: `Publishing ${items.length} item(s) to GitHub` });
+    session.emit({ kind: 'session-start', summary: `Publishing ${items.length} item(s) to ${label}` });
     const tools: Tool[] = [
       {
         name: 'list_items',
@@ -191,8 +280,10 @@ export async function runPublisher(root: string, config: BugpatrolConfig, deps: 
             ? `\n\nRECENT MERGED PR TITLES IN THIS REPO (use the same types and scopes)\n${recentTitles.map((t) => `- ${t}`).join('\n')}`
             : '';
           const scope = defaultScope ? `\nDefault PR scope: ${defaultScope}` : '';
-          const github = filed.length ? `\n\nALREADY ON GITHUB (from every Bugpatrol run)\n${filed.join('\n')}` : '';
-          return result(vars.redact(`${list}${scope}${github}${style}`) as string);
+          const already = filed.lines.length
+            ? `\n\nALREADY ON ${label.toUpperCase()} (from every Bugpatrol run)\n${filed.lines.join('\n')}`
+            : '';
+          return result(vars.redact(`${list}${scope}${already}${style}`) as string);
         },
       },
       {
@@ -264,38 +355,17 @@ export async function runPublisher(root: string, config: BugpatrolConfig, deps: 
               latestIssue.publishSkipped ||
               latestIssue.fixRejected ||
               latestFix?.status === 'rejected' ||
-              (item.kind === 'issue' && latestIssue.github) ||
+              (item.kind === 'issue' && filedRef(latestIssue)) ||
               (item.kind === 'pr' && (!latestFix || latestFix.pr))
             )
               return result('This item was dismissed or already handled.', true);
             Object.assign(item.issue, latestIssue);
             if (item.fix && latestFix) Object.assign(item.fix, latestFix);
             const candidates = await candidatesFor(workspace, item.issue);
-            const urls = new Map<string, string>();
-            if (deps.dryRun) {
-              for (const path of pathsFor(item, candidates)) urls.set(path, path);
-            } else {
-              resolved ??= await resolveRepo(gh, config, resolve(root, config.app.source));
-              if (!assetsReady) {
-                await ensureAssetsBranch(gh, resolved.repo, config.agents.github.assetsBranch);
-                assetsReady = true;
-              }
-              if (!labelsReady) {
-                await ensureLabels(gh, resolved.repo, config.agents.github.labels);
-                labelsReady = true;
-              }
-              for (const path of pathsFor(item, candidates))
-                urls.set(
-                  path,
-                  await uploadImage(
-                    gh,
-                    resolved.repo,
-                    config.agents.github.assetsBranch,
-                    resolve(root, path),
-                    item.issue.id,
-                  ),
-                );
-            }
+            const shots = [...pathsFor(item, candidates)];
+            const urls = deps.dryRun
+              ? new Map(shots.map((path) => [path, path]))
+              : await publisher!.images(item.issue.id, shots);
             const body = buildReport({
               kind: item.kind,
               summary,
@@ -303,28 +373,19 @@ export async function runPublisher(root: string, config: BugpatrolConfig, deps: 
               candidates,
               fix: item.fix,
               imageUrl: (path) => urls.get(path),
+              renderImage: deps.dryRun ? undefined : publisher!.renderImage,
               redact: (text) => vars.redact(text) as string,
               closes: item.kind === 'pr' ? item.issue.github?.number : undefined,
             });
             let url: string;
+            let name = '';
             if (deps.dryRun) {
               const dir = paths.publish(root);
               await mkdir(dir, { recursive: true });
               url = join(dir, `${item.issue.id}.md`);
               await writeFile(url, body);
             } else if (item.kind === 'pr' && item.fix) {
-              const opened = await createPr(gh, {
-                repo: resolved!.repo,
-                defaultBranch: resolved!.defaultBranch,
-                title,
-                body,
-                labels: config.agents.github.labels,
-                draft: config.agents.github.pullRequests === 'draft',
-                fix: item.fix,
-                issue: item.issue,
-                commitMessage: title,
-                memoryRoot: root,
-              });
+              const opened = await publisher!.openPr!({ title, body, fix: item.fix, issue: item.issue });
               url = opened.url;
               item.fix.pr = {
                 ...opened,
@@ -333,14 +394,16 @@ export async function runPublisher(root: string, config: BugpatrolConfig, deps: 
               };
               await workspace.saveFix(item.fix);
             } else {
-              const opened = await createIssue(gh, {
-                repo: resolved!.repo,
+              const finding = await publisher!.create({
+                issue: item.issue,
                 title,
                 body,
-                labels: config.agents.github.labels,
+                fingerprints: [...new Set([item.issue.fingerprint, ...candidates.map((c) => c.fingerprint)])],
+                images: urls,
               });
-              url = opened.url;
-              item.issue.github = { ...opened, at: new Date().toISOString() };
+              url = finding.url;
+              name = finding.name;
+              publisher!.link(item.issue, finding);
               item.issue.status = 'filed';
               await workspace.saveIssue(item.issue);
             }
@@ -350,7 +413,9 @@ export async function runPublisher(root: string, config: BugpatrolConfig, deps: 
               kind: 'issue',
               summary: deps.dryRun
                 ? `Drafted ${item.kind}: ${title}`
-                : `Opened ${item.kind === 'pr' ? 'PR' : 'GitHub issue'} #${url.split('/').at(-1)}: ${title}`,
+                : item.kind === 'pr'
+                  ? `Opened PR #${url.split('/').at(-1)}: ${title}`
+                  : `Opened ${label} issue ${name}: ${title}`,
               output: url,
             });
             return result(url);
@@ -393,9 +458,9 @@ export async function runPublisher(root: string, config: BugpatrolConfig, deps: 
       {
         role: 'judge',
         sessionId: record.id,
-        system: judgePublishSystem(lessonsFor(await workspace.readMemory(), 'judge')),
+        system: judgePublishSystem(lessonsFor(await workspace.readMemory(), 'judge'), label),
         prompt: vars.redact(
-          `${deps.dryRun ? 'DRY RUN: publish writes a local draft file, and nothing goes to GitHub. Say "drafted", not "published".\n' : ''}Review and publish these items:\n${items.map((item) => `${item.issue.id}: ${item.issue.title}`).join('\n')}`,
+          `${deps.dryRun ? `DRY RUN: publish writes a local draft file, and nothing goes to ${label}. Say "drafted", not "published".\n` : ''}Review and publish these items:\n${items.map((item) => `${item.issue.id}: ${item.issue.title}`).join('\n')}`,
         ) as string,
         tools: tools.map((tool) => ({
           ...tool,
@@ -414,13 +479,17 @@ export async function runPublisher(root: string, config: BugpatrolConfig, deps: 
     costUsd = outcome.costUsd;
   } catch (error) {
     status = 'failed';
-    session.emit({ kind: 'error', summary: `GitHub publishing failed: ${String(error)}` });
-    deps.onLog?.(`GitHub publishing failed: ${String(error)}`);
+    session.emit({ kind: 'error', summary: `${label} publishing failed: ${String(error)}` });
+    deps.onLog?.(`${label} publishing failed: ${String(error)}`);
   } finally {
     const prs = outcomes.filter((item) => item.kind === 'pr').length;
     const issues = outcomes.filter((item) => item.kind === 'issue').length;
     const skipped = outcomes.filter((item) => item.kind === 'skipped').length;
-    const summary = `${deps.dryRun ? 'Drafted' : 'Published'} ${prs} PR(s) and ${issues} issue(s); skipped ${skipped}`;
+    const linked = outcomes.filter((item) => item.kind === 'linked').length;
+    const reopened = outcomes.filter((item) => item.kind === 'reopened').length;
+    const summary =
+      `${deps.dryRun ? 'Drafted' : 'Published'} ${prs} PR(s) and ${issues} issue(s); skipped ${skipped}` +
+      (linked || reopened ? `; linked ${linked}; reopened ${reopened}` : '');
     await workspace.endSession(record.id, { summary, status, steps, costUsd });
     session.emit({ kind: 'session-end', summary });
     await session.idle(costUsd);

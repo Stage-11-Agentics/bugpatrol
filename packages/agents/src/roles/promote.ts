@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { type BugpatrolConfig, ConfigError, type Routine } from '@bugpatrol/core';
-import { defaultGh, type Gh } from '../github.js';
+import { type Gh, ghFor } from '../github.js';
 import { short } from '../review-comment.js';
 import { Workspace } from '../workspace.js';
 
@@ -18,7 +18,7 @@ export async function promoteClaims(
   claimIds: string[],
   opts: { gh?: Gh } = {},
 ): Promise<Routine[]> {
-  const gh = opts.gh ?? defaultGh;
+  const gh = opts.gh ?? ghFor(config);
   const workspace = new Workspace(root);
   const review = await workspace.readReview(number);
   if (!review?.claims)

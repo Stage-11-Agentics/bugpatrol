@@ -10,6 +10,7 @@ import {
   type AppMapScreen,
   type Candidate,
   type FixProposal,
+  fitLesson,
   type Issue,
   ignoreDataDir,
   type Lesson,
@@ -470,6 +471,31 @@ export function lessonsFor(memory: MemoryFile, role: LessonRole, limit = 15): Le
         b.lastSeenAt.localeCompare(a.lastSeenAt),
     )
     .slice(0, limit);
+}
+
+/**
+ * A person dismissed the finding on its tracker: the issue is dismissed, its
+ * fingerprints go into triage so the judge does not file it again, and the
+ * judge learns the reason. The caller saves the issue.
+ */
+export async function dismissByTracker(
+  workspace: Workspace,
+  issue: Issue,
+  by: string,
+  reason: string,
+  at: string,
+): Promise<void> {
+  issue.status = 'dismissed';
+  issue.closedBy = { by, reason, at };
+  await workspace.recordTriage(await dismissedFingerprints(workspace, issue, reason, at));
+  await workspace.upsertLessons([
+    {
+      role: 'judge',
+      source: 'human',
+      scope: issue.screenId,
+      text: fitLesson(`Not a bug: ${issue.title} — ${reason}`),
+    },
+  ]);
 }
 
 /** The issue's own fingerprint and every candidate it collected. */

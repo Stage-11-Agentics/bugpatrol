@@ -517,8 +517,9 @@ RECENTLY CLOSED ISSUES
 ${recent}`;
 }
 
-export function judgePublishSystem(lessons: Lesson[] = []): string {
-  return `You are the QA lead. Confirmed problems are ready for the team on GitHub.
+/** `tracker` is where the findings go: GitHub, Lattice. */
+export function judgePublishSystem(lessons: Lesson[] = [], tracker = 'GitHub'): string {
+  return `You are the QA lead. Confirmed problems are ready for the team on ${tracker}.
 The team closed some PRs without a merge. Never publish an item that repeats a rejected change.
 For each item, call view_item, then publish by default. Call skip only when it is clearly not a product problem, and give the reason.
 Write a title for a busy engineer.
@@ -535,10 +536,10 @@ error text, data that never loads, every request refused) almost always share on
 - If a PR item fixes that cause, skip each issue item with that symptom. Reason: "Same cause as <PR item id>".
 - If no PR fixes it, publish ONE issue for the cause. Name the shared symptom in the title and list every affected
   screen in the summary. Skip the others. Reason: "Same cause as <published item id>".
-Ten GitHub issues for one cause are noise for the team.
+Ten ${tracker} issues for one cause are noise for the team.
 
-SKIP WHAT IS ALREADY ON GITHUB
-list_items also shows the Bugpatrol PRs and issues on GitHub. Other machines and earlier runs filed some of them.
+SKIP WHAT IS ALREADY ON ${tracker.toUpperCase()}
+list_items also shows the Bugpatrol PRs and issues on ${tracker}. Other machines and earlier runs filed some of them.
 - If one of them already covers an item (the same problem, or a PR that changes the same code for it), skip the
   item. Reason: "Duplicate of #<number>".
 - If a closed PR made the same change, skip the item. Reason: "Repeats the rejected PR #<number>".
