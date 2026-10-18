@@ -3,7 +3,7 @@ import { type Gh, ghFor } from '../github.js';
 import { Workspace } from '../workspace.js';
 import { GitHubPublisher } from './github.js';
 
-/** What became of a finding on its tracker. */
+/** What became of a finding on its tracker. Every state that is not closed counts as open. */
 export type FindingState = 'open' | 'fixed' | 'dismissed';
 
 /** One filed finding: a GitHub issue, a file, a Lattice task. */
@@ -51,6 +51,11 @@ export interface Publisher {
   readonly name: PublisherName;
   /** For log lines and the publish judge: GitHub, Lattice. */
   readonly label: string;
+  /**
+   * Its findings carry fingerprints, so `filed()` is the dedupe. When the list
+   * cannot be read, such a publisher files nothing in that run.
+   */
+  readonly fingerprints: boolean;
   /** Why it cannot publish now, such as a missing CLI. */
   ready(): Promise<Ready>;
   /** What every machine that publishes here has filed: the dedupe list. */
@@ -59,7 +64,11 @@ export interface Publisher {
   ref(issue: Issue): Finding | undefined;
   /** Record the finding on the issue. The caller saves the issue. */
   link(issue: Issue, finding: Finding): void;
-  /** Upload or copy the screenshots before the finding exists. Returns the name the report gives each path. */
+  /**
+   * Upload or copy the screenshots before the finding exists. Returns the name
+   * the report gives each path; a publisher that attaches them after `create`
+   * returns local names and reads the paths from `CreateInput.images`.
+   */
   images(issueId: string, paths: string[]): Promise<Map<string, string>>;
   /** How the report shows one image. Default: an HTML img tag. */
   renderImage?: (name: string, width: number) => string;

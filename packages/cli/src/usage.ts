@@ -149,6 +149,10 @@ export const COMMAND_HELP: Record<string, string> = {
   Read the state of each filed finding back from the publisher. A dismissed finding becomes a dismissal, a closed one
   a fix, and a reopened one is filed again. On GitHub, a closed PR becomes a lesson.
 `,
+  github: `bugpatrol sync      (the same as: bugpatrol github sync)
+  Read the state of each filed finding back from the publisher. A dismissed finding becomes a dismissal, a closed one
+  a fix, and a reopened one is filed again. On GitHub, a closed PR becomes a lesson.
+`,
   issue: `bugpatrol issue list | dismiss <id> --reason "..." [--by name] | reopen <id>
   List the issues, worst first, or change the state of one issue.
 `,

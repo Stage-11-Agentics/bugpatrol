@@ -473,7 +473,6 @@ export function lessonsFor(memory: MemoryFile, role: LessonRole, limit = 15): Le
     .slice(0, limit);
 }
 
-/** The issue's own fingerprint and every candidate it collected. */
 /**
  * A person dismissed the finding on its tracker: the issue is dismissed, its
  * fingerprints go into triage so the judge does not file it again, and the
@@ -499,6 +498,7 @@ export async function dismissByTracker(
   ]);
 }
 
+/** The issue's own fingerprint and every candidate it collected. */
 export async function dismissedFingerprints(
   workspace: Workspace,
   issue: Issue,

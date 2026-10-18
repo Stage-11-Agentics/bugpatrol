@@ -24,6 +24,7 @@ import type { CreateInput, Filed, Finding, Publisher, Ready } from './index.js';
 export class GitHubPublisher implements Publisher {
   readonly name = 'github' as const;
   readonly label = 'GitHub';
+  readonly fingerprints = false;
   private repo?: { repo: string; defaultBranch: string };
   private assetsReady = false;
   private labelsReady = false;
@@ -87,7 +88,18 @@ export class GitHubPublisher implements Publisher {
   }
 
   link(issue: Issue, finding: Finding): void {
-    issue.github = { number: Number(finding.id), url: finding.url, at: new Date().toISOString() };
+    issue.github = {
+      number: Number(finding.id),
+      url: finding.url,
+      at: new Date().toISOString(),
+      ...(finding.state === 'open'
+        ? {}
+        : {
+            state: 'closed' as const,
+            stateReason: finding.state === 'dismissed' ? ('not_planned' as const) : ('completed' as const),
+            stateAt: finding.stateAt,
+          }),
+    };
   }
 
   async images(issueId: string, paths: string[]): Promise<Map<string, string>> {
@@ -142,6 +154,12 @@ export class GitHubPublisher implements Publisher {
       input.evidence,
       input.as === 'dismissed' ? 'not planned' : 'completed',
     );
+    issue.github = {
+      ...issue.github,
+      state: 'closed',
+      stateReason: input.as === 'dismissed' ? 'not_planned' : 'completed',
+      stateAt: new Date().toISOString(),
+    };
   }
 
   async reopen(issue: Issue, evidence: string): Promise<void> {

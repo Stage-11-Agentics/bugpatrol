@@ -1,12 +1,14 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { type BugpatrolConfig, type FixProposal, type Issue, parseConfig } from '@bugpatrol/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defaultGh, ghFor } from '../github.js';
+import { defaultGh, type Gh, ghFor } from '../github.js';
 import { runPublisher } from '../roles/publish.js';
 import type { Runtime } from '../types.js';
 import { Workspace } from '../workspace.js';
+import { GitHubPublisher } from './github.js';
 import { closeFinding, type Finding, type Publisher } from './index.js';
 
 let roots: string[] = [];
@@ -46,18 +48,20 @@ async function fixture(patch: Partial<Issue> = {}) {
 }
 
 /** An in-memory tracker: what a publisher must do, with no service behind it. */
-function memoryPublisher(found: Finding[] = [], options: { forge?: boolean } = {}) {
+function memoryPublisher(found: Finding[] = [], options: { forge?: boolean; unreadable?: boolean } = {}) {
   const calls: string[] = [];
   const findings = [...found];
   const refs = new Map<string, Finding>();
   const publisher: Publisher = {
     name: 'github',
     label: 'Memory',
+    fingerprints: true,
     async ready() {
       return { ok: true };
     },
     async filed() {
       calls.push('filed');
+      if (options.unreadable) throw new Error('the board is gone');
       return { findings, lines: findings.map((finding) => `- ${finding.name} [${finding.state}]: ${finding.title}`) };
     },
     ref(issue) {
@@ -193,7 +197,7 @@ describe('the Publisher interface', () => {
     expect((await f.workspace.readIssue('iss_1'))?.status).toBe('filed');
   });
 
-  it('leaves a verified fix in the dashboard when the publisher has no forge for a PR', async () => {
+  it('files a verified fix as an issue when the publisher has no forge for its PR', async () => {
     const f = await fixture();
     const fix: FixProposal = {
       version: 1,
@@ -215,9 +219,75 @@ describe('the Publisher interface', () => {
         createRuntime: publishingRuntime,
         onLog: (line) => logs.push(line),
       }),
-    ).toEqual([]);
-    expect(memory.calls).toEqual([]);
+    ).toMatchObject([{ issueId: 'iss_1', kind: 'issue' }]);
+    expect(memory.calls).not.toContain('openPr');
     expect(logs.join('\n')).toContain('cannot open PRs');
+  });
+
+  it('matches by a candidate fingerprint too, preferring the open finding', async () => {
+    const f = await fixture();
+    const session = await f.workspace.startSession('explorer');
+    await f.workspace.appendCandidate(session.id, {
+      id: 'can_1',
+      sessionId: session.id,
+      source: 'explorer',
+      fingerprint: 'fp-old',
+      summary: 'Slope header disagrees',
+      severity: 'major',
+      evidence: {},
+      createdAt: 'now',
+    });
+    await f.workspace.saveIssue({ ...f.issue, candidateIds: ['can_1'] });
+    const memory = memoryPublisher([
+      {
+        id: '6',
+        name: 'M-6',
+        title: 'Old',
+        url: 'memory://6',
+        state: 'fixed',
+        stateAt: '2026-10-01',
+        fingerprints: ['fp-old'],
+      },
+      {
+        id: '7',
+        name: 'M-7',
+        title: 'Old',
+        url: 'memory://7',
+        state: 'open',
+        stateAt: '2026-09-01',
+        fingerprints: ['fp-old'],
+      },
+    ]);
+    const runtime = publishingRuntime();
+    expect(await runPublisher(f.root, config, { publisher: memory.publisher, createRuntime: () => runtime })).toEqual([
+      { issueId: 'iss_1', kind: 'linked', url: 'memory://7' },
+    ]);
+  });
+
+  it('files nothing when a fingerprint publisher cannot list what it filed', async () => {
+    const f = await fixture();
+    const memory = memoryPublisher([], { unreadable: true });
+    const runtime = publishingRuntime();
+    const logs: string[] = [];
+    expect(
+      await runPublisher(f.root, config, {
+        publisher: memory.publisher,
+        createRuntime: () => runtime,
+        onLog: (line) => logs.push(line),
+      }),
+    ).toEqual([]);
+    expect(runtime.ran).toBe(0);
+    expect(logs.join('\n')).toContain('the board is gone');
+    expect((await f.workspace.readIssue('iss_1'))?.status).toBe('new');
+  });
+
+  it('drafts a dry run with no publisher configured', async () => {
+    const f = await fixture();
+    const off = parseConfig({ version: 1, app: { connect: { url: 'http://localhost' } } });
+    expect(await runPublisher(f.root, off, { createRuntime: publishingRuntime, dryRun: true })).toMatchObject([
+      { kind: 'issue' },
+    ]);
+    expect(await readFile(join(f.root, '.bugpatrol/runs/publish/iss_1.md'), 'utf8')).toContain('## What happened');
   });
 
   it('closes the finding as fixed or dismissed, with the evidence', async () => {
@@ -229,9 +299,67 @@ describe('the Publisher interface', () => {
     memory.publisher.link(f.issue, { id: '7', name: 'M-7', title: 't', url: 'memory://7', state: 'open' });
     await closeFinding(f.root, config, f.issue, { publisher: memory.publisher, evidence: 'Retest: fixed.' });
     expect(memory.calls).toEqual(['close iss_1 fixed: A recheck on main did not find it.\n\nRetest: fixed.']);
+    expect((await f.workspace.readIssue('iss_1'))?.status).toBe('fixed');
     const dismissed = { ...f.issue, status: 'dismissed' as const };
     await closeFinding(f.root, config, dismissed, { publisher: memory.publisher });
     expect(memory.calls.at(-1)).toMatch(/^close iss_1 dismissed/);
+  });
+});
+
+describe('GitHubPublisher', () => {
+  const issue = (github?: Issue['github']): Issue => ({
+    version: 1,
+    id: 'iss_1',
+    fingerprint: 'fp1',
+    title: 't',
+    body: 'b',
+    severity: 'major',
+    status: 'filed',
+    candidateIds: [],
+    evidence: {},
+    judgement: { by: 'judge', reason: 'r', at: 'now' },
+    occurrences: 1,
+    firstSeenAt: 'now',
+    lastSeenAt: 'now',
+    github,
+  });
+  const fake =
+    (calls: string[][]): Gh =>
+    async (args) => {
+      calls.push(args);
+      return args[0] === 'repo' ? 'main' : '';
+    };
+
+  it('reads issue.github as the finding, and keeps a closed state when it links one', () => {
+    const publisher = new GitHubPublisher('/tmp', config, fake([]));
+    expect(publisher.ref(issue())).toBeUndefined();
+    const closed = issue({ number: 8, url: 'u', at: 'now', state: 'closed', stateReason: 'not_planned' });
+    expect(publisher.ref(closed)).toMatchObject({ id: '8', name: '#8', state: 'dismissed' });
+    const linked = issue();
+    publisher.link(linked, { id: '9', name: '#9', title: 't', url: 'u9', state: 'fixed', stateAt: 'then' });
+    expect(linked.github).toMatchObject({ number: 9, state: 'closed', stateReason: 'completed', stateAt: 'then' });
+  });
+
+  it('closes and reopens with the evidence as the comment, and records the state', async () => {
+    const calls: string[][] = [];
+    const publisher = new GitHubPublisher('/tmp', config, fake(calls));
+    const filed = issue({ number: 8, url: 'u', at: 'now' });
+    await publisher.close(filed, { as: 'fixed', evidence: 'Recheck passed.' });
+    expect(calls.at(-1)).toEqual([
+      'issue',
+      'close',
+      '8',
+      '--repo',
+      'o/r',
+      '--comment',
+      'Recheck passed.',
+      '--reason',
+      'completed',
+    ]);
+    expect(publisher.ref(filed)?.state).toBe('fixed');
+    await publisher.reopen(filed, 'Seen again.');
+    expect(calls.at(-1)).toEqual(['issue', 'reopen', '8', '--repo', 'o/r', '--comment', 'Seen again.']);
+    expect(publisher.ref(filed)?.state).toBe('open');
   });
 });
 
@@ -246,5 +374,24 @@ describe('ghFor', () => {
       agents: { ...config.agents, github: { ...config.agents.github, enabled: false }, publisher: { use: 'file' } },
     } as unknown as BugpatrolConfig;
     await expect(ghFor(other)(['--version'])).rejects.toThrow(/agents\.publisher\.use is file/);
+  });
+
+  it('is the only way the source starts gh', async () => {
+    const packages = join(dirname(fileURLToPath(import.meta.url)), '../../..');
+    const spawns: string[] = [];
+    const walk = async (dir: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (!['node_modules', 'dist'].includes(entry.name)) await walk(path);
+        } else if (/\.tsx?$/.test(entry.name) && !entry.name.includes('.test.')) {
+          const text = await readFile(path, 'utf8');
+          if (/(execFile|execFileSync|spawn|spawnSync|exec)\(\s*'gh'/.test(text)) spawns.push(relative(packages, path));
+        }
+      }
+    };
+    await walk(packages);
+    // github.ts holds defaultGh; doctor's check runs only when agents.github is on.
+    expect(spawns.sort()).toEqual(['agents/src/github.ts', 'cli/src/commands/doctor.ts']);
   });
 });

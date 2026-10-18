@@ -94,6 +94,10 @@ async function reopenEvidence(workspace: Workspace, issue: Issue): Promise<strin
     .join('\n\n');
 }
 
+/** Open first, then the newest: the finding a person would expect a new sighting to join. */
+const preferred = (a: Finding, b: Finding) =>
+  Number(b.state === 'open') - Number(a.state === 'open') || (b.stateAt ?? '').localeCompare(a.stateAt ?? '');
+
 /**
  * The publisher's findings that share a fingerprint with an issue that has no
  * finding yet. A finding filed from another machine, or before this
@@ -101,7 +105,8 @@ async function reopenEvidence(workspace: Workspace, issue: Issue): Promise<strin
  */
 async function matchFiled(workspace: Workspace, items: Item[], findings: Finding[]): Promise<Map<string, Finding>> {
   const byFingerprint = new Map<string, Finding>();
-  for (const finding of findings) for (const fp of finding.fingerprints ?? []) byFingerprint.set(fp, finding);
+  for (const finding of [...findings].sort(preferred).reverse())
+    for (const fp of finding.fingerprints ?? []) byFingerprint.set(fp, finding);
   const matches = new Map<string, Finding>();
   if (!byFingerprint.size) return matches;
   for (const item of items) {
@@ -110,8 +115,8 @@ async function matchFiled(workspace: Workspace, items: Item[], findings: Finding
       item.issue.fingerprint,
       ...(await candidatesFor(workspace, item.issue)).map((candidate) => candidate.fingerprint),
     ];
-    const match = fingerprints.map((fp) => byFingerprint.get(fp)).find(Boolean);
-    if (match) matches.set(item.issue.id, match);
+    const found = fingerprints.flatMap((fp) => byFingerprint.get(fp) ?? []).sort(preferred);
+    if (found[0]) matches.set(item.issue.id, found[0]);
   }
   return matches;
 }
@@ -132,29 +137,25 @@ export async function runPublisher(root: string, config: BugpatrolConfig, deps: 
     if (issue.status === 'dismissed' || issue.publishSkipped || issue.fixRejected) return [];
     const fix = fixes.get(issue.id);
     if (fix?.status === 'rejected') return [];
-    if (fix && !fix.pr && publishable(fix)) {
-      if (canOpenPr) return [{ kind: 'pr' as const, issue, fix }];
-      waitingFixes++;
-      return [];
-    }
+    const prReady = Boolean(fix && !fix.pr && publishable(fix));
+    if (prReady && canOpenPr) return [{ kind: 'pr' as const, issue, fix }];
+    if (prReady) waitingFixes++;
     const ref = filedRef(issue);
     if (!deps.dryRun && publisher?.ref(issue)?.state === 'fixed' && issue.status === 'new' && issue.regression) {
       regressions.push(issue);
       return [];
     }
+    // With no forge for its PR, a fixed bug is still filed, so the team sees it.
     if (
       !ref &&
       !['fixed', 'dismissed'].includes(issue.status) &&
       rank[issue.severity] >= rank[config.agents.github.issueMinSeverity] &&
-      (!fix || ['declined', 'failed'].includes(fix.status))
+      (!fix || ['declined', 'failed'].includes(fix.status) || prReady)
     )
       return [{ kind: 'issue' as const, issue, fix }];
     return [];
   });
-  if (waitingFixes)
-    deps.onLog?.(
-      `${waitingFixes} verified fix(es) stay in the dashboard: ${label} cannot open PRs. Fix PRs need a forge.`,
-    );
+  if (waitingFixes) deps.onLog?.(`${waitingFixes} verified fix(es) wait in the dashboard: ${label} cannot open PRs.`);
   if (!items.length && !regressions.length) return [];
   if (!deps.dryRun) {
     const ready = await publisher!.ready();
@@ -178,42 +179,60 @@ export async function runPublisher(root: string, config: BugpatrolConfig, deps: 
     }
     try {
       filed = await publisher.filed();
-    } catch {
-      /* Without the list, the judge compares only the local items. */
-    }
-    // A finding with the issue's fingerprint is the same finding: link it, with no model.
-    const matches = await matchFiled(workspace, items, filed.findings);
-    const now = new Date().toISOString();
-    for (const [issueId, finding] of matches) {
-      const issue = items.find((item) => item.issue.id === issueId)!.issue;
-      publisher.link(issue, finding);
-      if (finding.state === 'dismissed')
-        await dismissByTracker(
-          workspace,
-          issue,
-          label,
-          `Dismissed on ${label} as ${finding.name}.`,
-          finding.stateAt ?? now,
-        );
-      else if (finding.state === 'fixed') {
-        issue.regression = { at: now, fromStatus: 'fixed' };
-        regressions.push(issue);
-      } else issue.status = 'filed';
-      await workspace.saveIssue(issue);
-      // A fixed finding reopens below, and reports that.
-      if (finding.state !== 'fixed') outcomes.push({ issueId, kind: 'linked', url: finding.url });
-    }
-    items.splice(0, items.length, ...items.filter((item) => !matches.has(item.issue.id)));
-    // A regression reopens its finding. The judge already confirmed it, so no model is needed.
-    for (const issue of regressions) {
-      try {
-        await publisher.reopen(issue, await reopenEvidence(workspace, issue));
-        issue.status = 'filed';
-        await workspace.saveIssue(issue);
-        outcomes.push({ issueId: issue.id, kind: 'reopened', url: publisher.ref(issue)?.url });
-      } catch (error) {
-        deps.onLog?.(`${label} reopen of ${issue.id} failed: ${String(error)}`);
+    } catch (error) {
+      deps.onLog?.(`Could not read what ${label} has filed: ${String(error)}`);
+      // Without its list, a fingerprint publisher cannot tell a new bug from a filed one.
+      if (publisher.fingerprints) {
+        deps.onLog?.(`Filed nothing on ${label} in this run, so no bug is filed twice.`);
+        return outcomes;
       }
+      /* GitHub's judge then compares only the local items. */
+    }
+    try {
+      // A finding with the issue's fingerprint is the same finding: link it, with no model.
+      const matches = await matchFiled(workspace, items, filed.findings);
+      const now = new Date().toISOString();
+      for (const item of items) {
+        const finding = matches.get(item.issue.id);
+        if (!finding) continue;
+        const { issue } = item;
+        publisher.link(issue, finding);
+        if (finding.state === 'dismissed')
+          await dismissByTracker(
+            workspace,
+            issue,
+            label,
+            `Dismissed on ${label} as ${finding.name}.`,
+            finding.stateAt ?? now,
+          );
+        else if (finding.state === 'fixed') {
+          // Seen after its finding closed as fixed: a regression, also when this machine never saw it fixed.
+          issue.regression = { at: now, fromStatus: 'fixed' };
+          regressions.push(issue);
+        } else issue.status = 'filed';
+        await workspace.saveIssue(issue);
+        // A fixed finding reopens below, and reports that.
+        if (finding.state !== 'fixed') outcomes.push({ issueId: issue.id, kind: 'linked', url: finding.url });
+      }
+      items.splice(0, items.length, ...items.filter((item) => !matches.has(item.issue.id)));
+      // A regression reopens its finding once. The judge already confirmed it, so no model is needed.
+      const reopened = new Set<string>();
+      for (const issue of regressions) {
+        const ref = publisher.ref(issue);
+        try {
+          if (ref && !reopened.has(ref.id)) await publisher.reopen(issue, await reopenEvidence(workspace, issue));
+          else if (ref) publisher.link(issue, { ...ref, state: 'open' });
+          if (ref) reopened.add(ref.id);
+          issue.status = 'filed';
+          await workspace.saveIssue(issue);
+          outcomes.push({ issueId: issue.id, kind: 'reopened', url: ref?.url });
+        } catch (error) {
+          deps.onLog?.(`${label} reopen of ${issue.id} failed: ${String(error)}`);
+        }
+      }
+    } catch (error) {
+      deps.onLog?.(`Linking to what ${label} has filed failed: ${String(error)}`);
+      return outcomes;
     }
   }
   if (!items.length) return outcomes;
@@ -466,7 +485,11 @@ export async function runPublisher(root: string, config: BugpatrolConfig, deps: 
     const prs = outcomes.filter((item) => item.kind === 'pr').length;
     const issues = outcomes.filter((item) => item.kind === 'issue').length;
     const skipped = outcomes.filter((item) => item.kind === 'skipped').length;
-    const summary = `${deps.dryRun ? 'Drafted' : 'Published'} ${prs} PR(s) and ${issues} issue(s); skipped ${skipped}`;
+    const linked = outcomes.filter((item) => item.kind === 'linked').length;
+    const reopened = outcomes.filter((item) => item.kind === 'reopened').length;
+    const summary =
+      `${deps.dryRun ? 'Drafted' : 'Published'} ${prs} PR(s) and ${issues} issue(s); skipped ${skipped}` +
+      (linked || reopened ? `; linked ${linked}; reopened ${reopened}` : '');
     await workspace.endSession(record.id, { summary, status, steps, costUsd });
     session.emit({ kind: 'session-end', summary });
     await session.idle(costUsd);

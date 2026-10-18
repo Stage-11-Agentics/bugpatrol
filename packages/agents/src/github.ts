@@ -27,8 +27,11 @@ export function ghFor(config: BugpatrolConfig): Gh {
   const use = config.agents.publisher.use;
   if (!use || use === 'github') return defaultGh;
   return async (args) => {
-    throw new Error(
-      `agents.publisher.use is ${use}: Bugpatrol does not run gh for this config (refused: gh ${args.join(' ')}).`,
+    throw Object.assign(
+      new Error(
+        `agents.publisher.use is ${use}: Bugpatrol does not run gh for this config (refused: gh ${args.join(' ')}).`,
+      ),
+      { refused: true },
     );
   };
 }
@@ -42,7 +45,8 @@ const missing = (error: unknown) => /404|not found/i.test(errorText(error));
 export async function ghReady(gh: Gh = defaultGh): Promise<{ ok: true } | { ok: false; reason: string }> {
   try {
     await gh(['--version']);
-  } catch {
+  } catch (error) {
+    if ((error as { refused?: boolean }).refused) return { ok: false, reason: (error as Error).message };
     return {
       ok: false,
       reason: 'GitHub publish skipped: the gh CLI is not installed. Install it from https://cli.github.com',
