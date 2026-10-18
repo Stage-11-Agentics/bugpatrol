@@ -127,9 +127,16 @@ function agentChecks(root: string, config: BugpatrolConfig, env: NodeJS.ProcessE
     });
   }
   if (publisherOf(config) === 'lattice') {
-    const { bin, dir } = config.agents.publisher.lattice;
+    const { bin, dir, tag } = config.agents.publisher.lattice;
     const cwd = resolve(root, dir);
-    const board = existsSync(cwd) && spawnSync(bin, ['list', '--tag', '-', '--json'], { cwd, stdio: 'ignore' });
+    const board =
+      existsSync(cwd) &&
+      spawnSync(bin, ['list', '--tag', tag, '--json'], {
+        cwd,
+        env: { ...process.env, LATTICE_ROOT: cwd },
+        stdio: 'ignore',
+        timeout: 15_000,
+      });
     checks.push({
       name: 'lattice',
       ok: Boolean(board && board.status === 0),
@@ -137,8 +144,8 @@ function agentChecks(root: string, config: BugpatrolConfig, env: NodeJS.ProcessE
       detail: !board
         ? `agents.publisher.lattice.dir does not exist: ${cwd}`
         : board.status === 0
-          ? `${bin} finds a board from ${cwd}`
-          : `${bin} found no board from ${cwd}. Install Lattice, run \`lattice init\` there, or set agents.publisher.lattice.`,
+          ? `${bin} reads the board at ${cwd}`
+          : `${bin} found no board at ${cwd}. Install Lattice, run \`lattice init\` there, or set agents.publisher.lattice.`,
     });
   }
   return checks;

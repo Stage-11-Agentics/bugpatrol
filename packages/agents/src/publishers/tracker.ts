@@ -67,9 +67,8 @@ export async function syncTracker(
       changed.push(issue.id);
       const at = remote.stateAt ?? now;
       if (remote.state === 'dismissed') {
-        const reason = remote.reason
-          ? `${remote.reason} (${remote.name})`
-          : `Dismissed on ${publisher.label} as ${remote.name}.`;
+        const why = remote.reason ?? (await publisher.reasonFor?.(remote));
+        const reason = why ? `${why} (${remote.name})` : `Dismissed on ${publisher.label} as ${remote.name}.`;
         await dismissByTracker(workspace, issue, publisher.label, reason, at);
       } else if (remote.state === 'fixed') {
         issue.status = 'fixed';

@@ -94,6 +94,8 @@ export interface Publisher {
   }): Promise<{ number: number; url: string }>;
   /** Recent merged PR titles, to teach the judge the repo's title style. */
   titleStyle?(): Promise<string[]>;
+  /** Why a person dismissed the finding, when `filed()` leaves it out because reading it costs a call. */
+  reasonFor?(finding: Finding): Promise<string | undefined>;
 }
 
 /** The publisher that the config selects (agents.publisher.use), or undefined when nothing is published. */

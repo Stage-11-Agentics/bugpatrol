@@ -456,12 +456,15 @@ export const agentsSchema = z
             dir: z.string().min(1).default('.bugpatrol/runs/findings'),
           })
           .default({}),
-        /** `use: lattice`: one task per finding on the board that the lattice CLI finds from `dir`. */
+        /** `use: lattice`: one task per finding on the Lattice board at `dir`. */
         lattice: z
           .object({
             /** `lattice-v2` on a checkout bound to a hosted board. */
             bin: z.string().min(1).default('lattice'),
-            /** Where the CLI runs, relative to the project root. It finds the board from there, as git does. */
+            /**
+             * The board: the directory that holds `.lattice/` (or a hosted binding), relative to the project root.
+             * Bugpatrol pins the CLI to it with LATTICE_ROOT, so it never walks up to another board.
+             */
             dir: z.string().min(1).default('.'),
             actor: z.string().min(1).default('agent:bugpatrol'),
             tag: z.string().min(1).default('bugpatrol'),

@@ -67,13 +67,13 @@ agents:
       dir: .bugpatrol/runs/findings # use: file: one JSON file per finding, with its screenshots
     lattice:                    # use: lattice: one task per finding on a Lattice board
       bin: lattice              # lattice-v2 on a checkout bound to a hosted board
-      dir: .                    # where the CLI runs; it finds the board from there
+      dir: .                    # the board: the directory with .lattice/; the CLI never walks up from it
       actor: agent:bugpatrol
       tag: bugpatrol
       type: bug
       fixedStatus: done
       reopenStatus: backlog
-      dismissedStatuses: [cancelled, wont_do]
+      dismissedStatuses: [cancelled, wont_do]   # a board's own won't-do status counts, where it has one
   review:
     name: web                   # optional: tells two reviews of one pull request apart, each with its own review and check run
     claims: false               # the claim check of `bugpatrol review`: test what the pull request says it does

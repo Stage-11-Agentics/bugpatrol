@@ -84,6 +84,7 @@ type FakeTask = {
   type?: string;
   priority?: string;
   last_status_changed_at: string;
+  archived?: boolean;
   events: { type: string; provenance?: { reason?: string } }[];
   artifacts: { title: string; path: string }[];
   comments: string[];
@@ -98,7 +99,7 @@ const TRANSITIONS: Record<string, string[]> = {
 };
 
 /** An in-memory Lattice board that answers the CLI's verbs with its JSON envelope. */
-function fakeLattice() {
+function fakeLattice(faults: { lostCreate?: boolean; failAttach?: boolean } = {}) {
   const tasks: FakeTask[] = [];
   const calls: string[][] = [];
   const ok = (data: unknown) => ({ code: 0, stdout: JSON.stringify({ ok: true, data }), stderr: '' });
@@ -115,7 +116,11 @@ function fakeLattice() {
       case '--version':
         return { code: 0, stdout: 'lattice, version 0.2.3\n', stderr: '' };
       case 'list':
-        return ok(tasks.filter((task) => task.tags.includes(flag('--tag')!)));
+        return ok(
+          tasks.filter(
+            (task) => task.tags.includes(flag('--tag')!) && (!task.archived || args.includes('--include-archived')),
+          ),
+        );
       case 'create': {
         const n = tasks.length + 1;
         const task: FakeTask = {
@@ -133,23 +138,32 @@ function fakeLattice() {
           comments: [],
         };
         tasks.push(task);
+        // The task is made, but the answer is lost, as on a timeout.
+        if (faults.lostCreate) return { code: 1, stdout: 'Update available: lattice 0.2.4\n', stderr: '' };
         return ok(task);
       }
       case 'attach': {
         const task = find(args[1]!);
         if (!task) return fail('NOT_FOUND', 'no task');
+        if (faults.failAttach) return fail('IO_ERROR', 'disk full');
         task.artifacts.push({ title: flag('--title')!, path: args[2]! });
         return ok({ id: `art_${task.artifacts.length}` });
       }
-      case 'comment': {
+      case 'unarchive': {
         const task = find(args[1]!);
         if (!task) return fail('NOT_FOUND', 'no task');
+        task.archived = false;
+        return ok({});
+      }
+      case 'comment': {
+        const task = find(args[1]!);
+        if (!task || task.archived) return fail('NOT_FOUND', 'no task');
         task.comments.push(readFileSync(flag('--file')!, 'utf8'));
         return ok(task);
       }
       case 'status': {
         const task = find(args[1]!);
-        if (!task) return fail('NOT_FOUND', 'no task');
+        if (!task || task.archived) return fail('NOT_FOUND', 'no task');
         const to = args[2]!;
         if (!(TRANSITIONS[task.status] ?? []).includes(to) && !args.includes('--force'))
           return fail('INVALID_TRANSITION', `Invalid transition from ${task.status} to ${to}.`);
@@ -174,7 +188,7 @@ function fakeLattice() {
     task.events.push({ type: 'status_changed', provenance: { reason } });
   };
   const find = (id: string) => tasks.find((task) => task.id === id || task.short_id === id);
-  return { run, tasks, calls, person };
+  return { run, tasks, calls, person, find };
 }
 
 describe('the Lattice publisher', () => {
@@ -334,18 +348,72 @@ describe('the Lattice publisher', () => {
     expect(logs.join('\n')).toContain('set by a person');
   });
 
-  it('runs the named CLI in the named directory, and says so when it cannot', async () => {
+  it('runs the named CLI pinned to the named board, and says so when it cannot', async () => {
     const root = await temp('lattice-bin');
     const board = join(root, 'board');
     await mkdir(board);
     const bin = join(root, 'my-lattice');
-    await writeFile(bin, `#!/bin/sh\npwd > '${join(root, 'cwd')}'\necho '{"ok":true,"data":[]}'\n`);
+    await writeFile(bin, `#!/bin/sh\necho "$LATTICE_ROOT" > '${join(root, 'pinned')}'\necho '{"ok":true,"data":[]}'\n`);
     await chmod(bin, 0o755);
     const publisher = new LatticePublisher(root, configFor({ bin, dir: 'board' }));
+    expect(await publisher.ready()).toEqual({ ok: true });
     expect(await publisher.filed()).toEqual({ findings: [], lines: [] });
-    expect((await readFile(join(root, 'cwd'), 'utf8')).trim()).toMatch(/board$/);
+    expect((await readFile(join(root, 'pinned'), 'utf8')).trim()).toBe(board);
     const missing = new LatticePublisher(root, configFor({ bin: join(root, 'no-such-lattice') }));
     expect(await missing.ready()).toMatchObject({ ok: false, reason: expect.stringContaining('no-such-lattice') });
+    const nowhere = new LatticePublisher(root, configFor({ bin, dir: 'no-board-here' }));
+    expect(await nowhere.ready()).toMatchObject({ ok: false, reason: expect.stringContaining('no Lattice board') });
+  });
+
+  it('files no second task when the create answer is lost, and still files when a screenshot will not attach', async () => {
+    const root = await temp('lattice-faults');
+    const config = configFor();
+    await workspaceWith(root, { title: '-0.0 dB on an EQ band' });
+    const lost = fakeLattice({ lostCreate: true, failAttach: true });
+    const logs: string[] = [];
+    const publisher = new LatticePublisher(root, config, { run: lost.run, onLog: (line) => logs.push(line) });
+    const runtime: Runtime = {
+      label: 'fake',
+      async run(task) {
+        const publish = task.tools.find((tool) => tool.name === 'publish')!;
+        expect(
+          (await publish.run({ issue_id: 'iss_1', title: '-0.0 dB on an EQ band', summary: 'Sign.' })).isError,
+        ).toBe(false);
+        return { stop: 'done', steps: 1, costUsd: 0 };
+      },
+    };
+    expect(await runPublisher(root, config, { publisher, createRuntime: () => runtime })).toMatchObject([
+      { kind: 'issue', url: 'HUM-1' },
+    ]);
+    expect(lost.tasks).toHaveLength(1);
+    expect(lost.tasks[0]!.title).toBe('-0.0 dB on an EQ band');
+    expect(logs.join('\n')).toContain('answer was lost');
+    expect(logs.join('\n')).toContain('did not attach');
+  });
+
+  it('follows a task whose marker a person edited away, and reopens a fixed task from the archive', async () => {
+    const root = await temp('lattice-archive');
+    const lattice = fakeLattice();
+    const config = configFor();
+    const publisher = new LatticePublisher(root, config, { run: lattice.run });
+    const { workspace } = await workspaceWith(root);
+    await runPublisher(root, config, { publisher, createRuntime: publishingRuntime });
+    const task = lattice.find('HUM-1')!;
+    task.description = 'Rewritten by a person.';
+    lattice.person('HUM-1', 'done', 'Fixed in 1.2.');
+    expect(await syncFindings(root, config, { publisher })).toEqual({ changed: ['iss_1'] });
+    expect((await workspace.readIssue('iss_1'))?.status).toBe('fixed');
+    task.archived = true;
+    await workspace.saveIssue({
+      ...(await workspace.readIssue('iss_1'))!,
+      status: 'new',
+      regression: { at: '2026-10-17T10:00:00Z', fromStatus: 'fixed' },
+    });
+    expect(await runPublisher(root, config, { publisher, createRuntime: publishingRuntime })).toMatchObject([
+      { kind: 'reopened' },
+    ]);
+    expect(task).toMatchObject({ archived: false, status: 'backlog' });
+    expect(task.comments.at(-1)).toContain('seen again');
   });
 });
 
