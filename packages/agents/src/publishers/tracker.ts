@@ -1,0 +1,77 @@
+import type { Issue, PublishedRef } from '@bugpatrol/core';
+import { dismissByTracker, Workspace } from '../workspace.js';
+import type { Finding, Publisher } from './index.js';
+
+/** The issue's ref on this publisher's target, or undefined when it has none there. */
+export function refOn(issue: Issue, name: string, target: string): PublishedRef | undefined {
+  const ref = issue.published?.[name];
+  return ref?.target === target ? ref : undefined;
+}
+
+export function asFinding(issue: Issue, ref: PublishedRef): Finding {
+  return { id: ref.id, name: ref.name, title: issue.title, url: ref.url, state: ref.state, stateAt: ref.stateAt };
+}
+
+export function setRef(issue: Issue, name: string, target: string, finding: Finding): void {
+  issue.published = {
+    ...issue.published,
+    [name]: {
+      id: finding.id,
+      name: finding.name,
+      url: finding.url,
+      at: new Date().toISOString(),
+      target,
+      state: finding.state,
+      stateAt: finding.stateAt,
+    },
+  };
+}
+
+/**
+ * Read each finding's state back onto its issue, for a publisher whose
+ * findings carry their state (a file, a Lattice task). A person who dismisses
+ * a finding there dismisses the issue here, and the judge does not file it
+ * again; a closed finding is a fix; a reopened one is filed again.
+ */
+export async function syncTracker(
+  root: string,
+  publisher: Publisher,
+  name: string,
+  target: string,
+): Promise<{ changed: string[] }> {
+  const workspace = new Workspace(root);
+  const issues = (await workspace.listIssues()).filter((issue) => refOn(issue, name, target));
+  if (!issues.length) return { changed: [] };
+  const byId = new Map((await publisher.filed()).findings.map((finding) => [finding.id, finding]));
+  const changed: string[] = [];
+  const now = new Date().toISOString();
+  for (const issue of issues) {
+    const ref = refOn(issue, name, target)!;
+    const remote = byId.get(ref.id);
+    if (!remote) continue;
+    const transition = remote.state !== ref.state;
+    const stale = !ref.checkedAt || Date.parse(now) - Date.parse(ref.checkedAt) >= 3_600_000;
+    if (!transition && !stale) continue;
+    if (transition) {
+      changed.push(issue.id);
+      const at = remote.stateAt ?? now;
+      if (remote.state === 'dismissed') {
+        const reason = remote.reason
+          ? `${remote.reason} (${remote.name})`
+          : `Dismissed on ${publisher.label} as ${remote.name}.`;
+        await dismissByTracker(workspace, issue, publisher.label, reason, at);
+      } else if (remote.state === 'fixed') {
+        issue.status = 'fixed';
+        issue.closedBy = { by: publisher.label, reason: `Closed on ${publisher.label} as fixed (${remote.name}).`, at };
+      } else {
+        issue.status = 'filed';
+        issue.closedBy = undefined;
+      }
+    }
+    ref.state = remote.state;
+    ref.stateAt = remote.stateAt;
+    ref.checkedAt = now;
+    await workspace.saveIssue(issue);
+  }
+  return { changed };
+}

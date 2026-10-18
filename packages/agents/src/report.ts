@@ -102,3 +102,17 @@ export function buildReport(input: ReportInput): string {
 export function reproRoutineId(body: string): string | undefined {
   return /<!-- bugpatrol:routine ([A-Za-z0-9_][\w.-]*) -->/.exec(body)?.[1];
 }
+
+/**
+ * The hidden marker that carries a finding's fingerprints in its text, so a
+ * publisher with no fields of its own (a Lattice task) still dedupes, from
+ * any machine.
+ */
+export function fingerprintMarker(fingerprints: string[]): string {
+  return `<!-- bugpatrol:fingerprint ${fingerprints.join(' ')} -->`;
+}
+
+/** The fingerprints in a finding's hidden marker. */
+export function markerFingerprints(body: string): string[] {
+  return (/<!-- bugpatrol:fingerprint ([\w.: -]+?) -->/.exec(body)?.[1] ?? '').split(' ').filter(Boolean);
+}

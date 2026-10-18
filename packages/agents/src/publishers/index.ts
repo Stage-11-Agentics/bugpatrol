@@ -1,6 +1,7 @@
 import { type BugpatrolConfig, type FixProposal, type Issue, type PublisherName, publisherOf } from '@bugpatrol/core';
 import { type Gh, ghFor } from '../github.js';
 import { Workspace } from '../workspace.js';
+import { FilePublisher } from './file.js';
 import { GitHubPublisher } from './github.js';
 
 /** What became of a finding on its tracker. Every state that is not closed counts as open. */
@@ -20,6 +21,8 @@ export type Finding = {
   stateAt?: string;
   /** Read back from the finding's hidden marker. Without them, nothing matches it to an issue. */
   fingerprints?: string[];
+  /** Why it was closed or dismissed, when the tracker says. */
+  reason?: string;
 };
 
 export type Filed = {
@@ -95,6 +98,8 @@ export function publisherFor(root: string, config: BugpatrolConfig, deps: { gh?:
   switch (publisherOf(config)) {
     case 'github':
       return new GitHubPublisher(root, config, deps.gh ?? ghFor(config));
+    case 'file':
+      return new FilePublisher(root, config);
     default:
       return undefined;
   }

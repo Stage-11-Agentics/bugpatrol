@@ -5,6 +5,7 @@ import {
   type Candidate,
   type FixProposal,
   type Issue,
+  issueMinSeverity,
   judgedRetests,
   paths,
 } from '@bugpatrol/core';
@@ -149,7 +150,7 @@ export async function runPublisher(root: string, config: BugpatrolConfig, deps: 
     if (
       !ref &&
       !['fixed', 'dismissed'].includes(issue.status) &&
-      rank[issue.severity] >= rank[config.agents.github.issueMinSeverity] &&
+      rank[issue.severity] >= rank[issueMinSeverity(config)] &&
       (!fix || ['declined', 'failed'].includes(fix.status) || prReady)
     )
       return [{ kind: 'issue' as const, issue, fix }];

@@ -29,6 +29,7 @@ import {
   ExitCode,
   formatUsage,
   InfrastructureError,
+  issueMinSeverity,
   publisherOf,
 } from '@bugpatrol/core';
 import { createDriver } from '@bugpatrol/drivers';
@@ -213,7 +214,7 @@ export async function runAgentCommand(
     if (!outcomes.length) {
       log(
         `Nothing to publish. Bugpatrol opens a PR for each fix that has no PR yet, and files each open issue ` +
-          `at ${config.agents.github.issueMinSeverity} or worse that has no fix and is not filed yet.`,
+          `at ${issueMinSeverity(config)} or worse that has no fix and is not filed yet.`,
       );
       return;
     }
