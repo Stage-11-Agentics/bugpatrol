@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { desktopCommands, onPath, runtimeProblem } from '@bugpatrol/agents';
-import { type BugpatrolConfig, ExitCode, type ExitCodeValue, legacyLayout, paths } from '@bugpatrol/core';
+import { type BugpatrolConfig, ExitCode, type ExitCodeValue, legacyLayout, paths, publisherOf } from '@bugpatrol/core';
 
 export type DoctorCheck = { name: string; ok: boolean; detail: string; fatal: boolean };
 
@@ -31,7 +32,7 @@ export function runChecks(root: string, config: BugpatrolConfig | undefined): Do
     fatal: true,
   });
 
-  if (config) checks.push(...agentChecks(config));
+  if (config) checks.push(...agentChecks(root, config));
   if (config?.app.platform === 'cli')
     checks.push({
       name: 'cli:python3',
@@ -96,8 +97,8 @@ export function runChecks(root: string, config: BugpatrolConfig | undefined): Do
   return checks;
 }
 
-/** The checks that the agent commands need: an LLM for each agent, and gh for GitHub. */
-function agentChecks(config: BugpatrolConfig, env: NodeJS.ProcessEnv = process.env): DoctorCheck[] {
+/** The checks that the agent commands need: an LLM for each agent, and the publisher's CLI. */
+function agentChecks(root: string, config: BugpatrolConfig, env: NodeJS.ProcessEnv = process.env): DoctorCheck[] {
   const checks: DoctorCheck[] = [];
   const roles = (['explorer', 'judge', 'fixer'] as const).filter(
     (role) => role !== 'fixer' || config.agents.fixer.enabled,
@@ -123,6 +124,21 @@ function agentChecks(config: BugpatrolConfig, env: NodeJS.ProcessEnv = process.e
         : loggedIn
           ? 'gh is logged in'
           : 'agents.github is on, but gh is not logged in. Run `gh auth login`.',
+    });
+  }
+  if (publisherOf(config) === 'lattice') {
+    const { bin, dir } = config.agents.publisher.lattice;
+    const cwd = resolve(root, dir);
+    const board = existsSync(cwd) && spawnSync(bin, ['list', '--tag', '-', '--json'], { cwd, stdio: 'ignore' });
+    checks.push({
+      name: 'lattice',
+      ok: Boolean(board && board.status === 0),
+      fatal: false,
+      detail: !board
+        ? `agents.publisher.lattice.dir does not exist: ${cwd}`
+        : board.status === 0
+          ? `${bin} finds a board from ${cwd}`
+          : `${bin} found no board from ${cwd}. Install Lattice, run \`lattice init\` there, or set agents.publisher.lattice.`,
     });
   }
   return checks;

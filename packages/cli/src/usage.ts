@@ -125,7 +125,8 @@ export const COMMAND_HELP: Record<string, string> = {
   publish: `bugpatrol publish [--issue <id>]... [--dry-run]
   File each bug at agents.github.issueMinSeverity or worse with no fix on the publisher that agents.publisher.use
   names, and open a draft PR for each fix. GitHub is the publisher when agents.github.enabled is on, and it needs a
-  logged-in gh CLI; agents.publisher.use: file writes one JSON file per finding instead. A bug whose fingerprint is
+  logged-in gh CLI; agents.publisher.use: file writes one JSON file per finding instead, and lattice one task per
+  finding on a Lattice board. A bug whose fingerprint is
   already filed is linked to that finding, not filed again; a finding dismissed there dismisses the bug here.
   --dry-run       write the reports to .bugpatrol/runs/publish/, and open nothing
   --issue <id>    publish this issue only

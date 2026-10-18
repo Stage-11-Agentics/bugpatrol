@@ -4,6 +4,9 @@
     "packages/drivers": {
       "ignoreBinaries": ["adb"]
     },
+    "packages/agents": {
+      "ignoreBinaries": ["lattice"]
+    },
     "packages/bugpatrol": {
       "entry": ["build.mjs"],
       "ignoreDependencies": [

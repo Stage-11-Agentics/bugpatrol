@@ -3,6 +3,7 @@ import { type Gh, ghFor } from '../github.js';
 import { Workspace } from '../workspace.js';
 import { FilePublisher } from './file.js';
 import { GitHubPublisher } from './github.js';
+import { LatticePublisher, type LatticeRun } from './lattice.js';
 
 /** What became of a finding on its tracker. Every state that is not closed counts as open. */
 export type FindingState = 'open' | 'fixed' | 'dismissed';
@@ -99,13 +100,15 @@ export interface Publisher {
 export function publisherFor(
   root: string,
   config: BugpatrolConfig,
-  deps: { gh?: Gh; onLog?: (message: string) => void } = {},
+  deps: { gh?: Gh; lattice?: LatticeRun; onLog?: (message: string) => void } = {},
 ): Publisher | undefined {
   switch (publisherOf(config)) {
     case 'github':
       return new GitHubPublisher(root, config, deps.gh ?? ghFor(config));
     case 'file':
       return new FilePublisher(root, config, { onLog: deps.onLog });
+    case 'lattice':
+      return new LatticePublisher(root, config, { run: deps.lattice, onLog: deps.onLog });
     default:
       return undefined;
   }

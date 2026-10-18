@@ -65,6 +65,15 @@ agents:
     issueMinSeverity: major     # optional: file a bug with no fix at this severity or worse; default agents.github's
     file:
       dir: .bugpatrol/runs/findings # use: file: one JSON file per finding, with its screenshots
+    lattice:                    # use: lattice: one task per finding on a Lattice board
+      bin: lattice              # lattice-v2 on a checkout bound to a hosted board
+      dir: .                    # where the CLI runs; it finds the board from there
+      actor: agent:bugpatrol
+      tag: bugpatrol
+      type: bug
+      fixedStatus: done
+      reopenStatus: backlog
+      dismissedStatuses: [cancelled, wont_do]
   review:
     name: web                   # optional: tells two reviews of one pull request apart, each with its own review and check run
     claims: false               # the claim check of `bugpatrol review`: test what the pull request says it does
@@ -97,6 +106,7 @@ publisher other than GitHub never runs `gh`: review, CI, and the GitHub sync ref
 | --- | --- | --- | --- |
 | `github` | GitHub issues, screenshots on `agents.github.assetsBranch`, fixes as PRs | The publish judge reads the filed issues | Close it as not planned |
 | `file` | `<dir>/<fingerprint>.json`, screenshots in `<dir>/images/` | Each file lists its fingerprints | Set its `status` to `dismissed`, and `reason` |
+| `lattice` | Tasks tagged `tag`, screenshots as artifacts, a fix or a regression as a status move with a comment | A hidden marker in the description lists the fingerprints | Move it to a `dismissedStatuses` status, with a reason |
 
 The publish step links a bug to a filed finding that has one of its fingerprints instead of filing it again. A
 finding that a person dismissed dismisses the bug, and its fingerprints go into triage, so the judge does not file it
