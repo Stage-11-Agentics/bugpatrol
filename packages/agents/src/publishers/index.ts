@@ -3,6 +3,7 @@ import { type Gh, ghFor } from '../github.js';
 import { Workspace } from '../workspace.js';
 import { FilePublisher } from './file.js';
 import { GitHubPublisher } from './github.js';
+import { LatticePublisher, type LatticeRun } from './lattice.js';
 
 /** What became of a finding on its tracker. Every state that is not closed counts as open. */
 export type FindingState = 'open' | 'fixed' | 'dismissed';
@@ -93,19 +94,23 @@ export interface Publisher {
   }): Promise<{ number: number; url: string }>;
   /** Recent merged PR titles, to teach the judge the repo's title style. */
   titleStyle?(): Promise<string[]>;
+  /** Why a person dismissed the finding, when `filed()` leaves it out because reading it costs a call. */
+  reasonFor?(finding: Finding): Promise<string | undefined>;
 }
 
 /** The publisher that the config selects (agents.publisher.use), or undefined when nothing is published. */
 export function publisherFor(
   root: string,
   config: BugpatrolConfig,
-  deps: { gh?: Gh; onLog?: (message: string) => void } = {},
+  deps: { gh?: Gh; lattice?: LatticeRun; onLog?: (message: string) => void } = {},
 ): Publisher | undefined {
   switch (publisherOf(config)) {
     case 'github':
       return new GitHubPublisher(root, config, deps.gh ?? ghFor(config));
     case 'file':
       return new FilePublisher(root, config, { onLog: deps.onLog });
+    case 'lattice':
+      return new LatticePublisher(root, config, { run: deps.lattice, onLog: deps.onLog });
     default:
       return undefined;
   }

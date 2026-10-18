@@ -349,7 +349,7 @@ export const AGENT_CHECKS = [
 export type AgentCheck = (typeof AGENT_CHECKS)[number];
 
 /** Where the publish step files findings (`agents.publisher.use`). */
-export const PUBLISHERS = ['github', 'file'] as const;
+export const PUBLISHERS = ['github', 'file', 'lattice'] as const;
 export type PublisherName = (typeof PUBLISHERS)[number];
 
 export const agentsSchema = z
@@ -454,6 +454,27 @@ export const agentsSchema = z
              * directory to share findings and dismissals across machines; the screenshots of the app go with them.
              */
             dir: z.string().min(1).default('.bugpatrol/runs/findings'),
+          })
+          .default({}),
+        /** `use: lattice`: one task per finding on the Lattice board at `dir`. */
+        lattice: z
+          .object({
+            /** `lattice-v2` on a checkout bound to a hosted board. */
+            bin: z.string().min(1).default('lattice'),
+            /**
+             * The board: the directory that holds `.lattice/` (or a hosted binding), relative to the project root.
+             * Bugpatrol pins the CLI to it with LATTICE_ROOT, so it never walks up to another board.
+             */
+            dir: z.string().min(1).default('.'),
+            actor: z.string().min(1).default('agent:bugpatrol'),
+            tag: z.string().min(1).default('bugpatrol'),
+            type: z.string().min(1).default('bug'),
+            /** A fixed finding moves here. */
+            fixedStatus: z.string().min(1).default('done'),
+            /** A regression moves its finding back here. */
+            reopenStatus: z.string().min(1).default('backlog'),
+            /** A finding a person moves to one of these is dismissed. Bugpatrol dismisses to the first. */
+            dismissedStatuses: z.array(z.string().min(1)).min(1).default(['cancelled', 'wont_do']),
           })
           .default({}),
       })
