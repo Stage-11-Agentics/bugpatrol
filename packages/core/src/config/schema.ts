@@ -449,8 +449,11 @@ export const agentsSchema = z
         /** `use: file`: one JSON file per finding, and its screenshots, in `dir`. */
         file: z
           .object({
-            /** Relative to the project root. Commit it to share the findings, and their dismissals, with the team. */
-            dir: z.string().min(1).default('.bugpatrol/findings'),
+            /**
+             * Relative to the project root. The default is local and ignored by git. Point it at a shared or committed
+             * directory to share findings and dismissals across machines; the screenshots of the app go with them.
+             */
+            dir: z.string().min(1).default('.bugpatrol/runs/findings'),
           })
           .default({}),
       })

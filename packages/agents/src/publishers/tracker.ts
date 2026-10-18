@@ -1,6 +1,12 @@
+import { relative } from 'node:path';
 import type { Issue, PublishedRef } from '@bugpatrol/core';
 import { dismissByTracker, Workspace } from '../workspace.js';
 import type { Finding, Publisher } from './index.js';
+
+/** How a ref names its target: relative to the project root, so the project can move. */
+export function trackerTarget(root: string, dir: string): string {
+  return relative(root, dir) || '.';
+}
 
 /** The issue's ref on this publisher's target, or undefined when it has none there. */
 export function refOn(issue: Issue, name: string, target: string): PublishedRef | undefined {
@@ -38,6 +44,7 @@ export async function syncTracker(
   publisher: Publisher,
   name: string,
   target: string,
+  onLog?: (message: string) => void,
 ): Promise<{ changed: string[] }> {
   const workspace = new Workspace(root);
   const issues = (await workspace.listIssues()).filter((issue) => refOn(issue, name, target));
@@ -48,7 +55,11 @@ export async function syncTracker(
   for (const issue of issues) {
     const ref = refOn(issue, name, target)!;
     const remote = byId.get(ref.id);
-    if (!remote) continue;
+    if (!remote) {
+      onLog?.(`${issue.id}: its finding ${ref.name} is no longer on ${publisher.label}; the issue stays as it is.`);
+      continue;
+    }
+    if (remote.unknownState) continue;
     const transition = remote.state !== ref.state;
     const stale = !ref.checkedAt || Date.parse(now) - Date.parse(ref.checkedAt) >= 3_600_000;
     if (!transition && !stale) continue;
@@ -63,7 +74,8 @@ export async function syncTracker(
       } else if (remote.state === 'fixed') {
         issue.status = 'fixed';
         issue.closedBy = { by: publisher.label, reason: `Closed on ${publisher.label} as fixed (${remote.name}).`, at };
-      } else {
+      } else if (issue.status === 'fixed' || issue.status === 'dismissed') {
+        // A person reopened it. Work under way on the issue keeps its status.
         issue.status = 'filed';
         issue.closedBy = undefined;
       }

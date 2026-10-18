@@ -95,22 +95,25 @@ describe('the file publisher', () => {
     const root = await temp('file-nogh');
     const dir = join(root, 'findings');
     const config = configFor(dir);
-    const { issue } = await workspaceWith(root);
+    const { workspace } = await workspaceWith(root);
     // A gh on the PATH that records every start.
     const bin = await temp('fake-gh');
     const log = join(bin, 'gh.log');
     await writeFile(join(bin, 'gh'), `#!/bin/sh\necho "$@" >> '${log}'\n`);
     await chmod(join(bin, 'gh'), 0o755);
     const path = process.env.PATH;
-    process.env.PATH = `${bin}:${path}`;
+    process.env.PATH = `${bin}:${path ?? ''}`;
     try {
-      await runPublisher(root, config, { createRuntime: publishingRuntime });
+      expect(await runPublisher(root, config, { createRuntime: publishingRuntime })).toMatchObject([{ kind: 'issue' }]);
       await syncFindings(root, config);
-      await closeFinding(root, config, { ...issue, status: 'dismissed' }, { onLog: () => {} });
+      const filed = (await workspace.readIssue('iss_1'))!;
+      await closeFinding(root, config, { ...filed, status: 'fixed' }, { onLog: () => {} });
+      expect(await findings(dir)).toMatchObject([{ status: 'fixed' }]);
       expect(await watchCi(root, config)).toEqual({ problems: [] });
       expect(await ghReady(ghFor(config))).toMatchObject({ ok: false, reason: expect.stringContaining('use is file') });
     } finally {
-      process.env.PATH = path;
+      if (path === undefined) delete process.env.PATH;
+      else process.env.PATH = path;
     }
     await expect(readFile(log, 'utf8')).rejects.toThrow(/ENOENT/);
   });
@@ -181,6 +184,51 @@ describe('the file publisher', () => {
     ]);
     expect((await new Workspace(third).readIssue('iss_1'))?.status).toBe('dismissed');
     expect(await findings(shared)).toHaveLength(1);
+  });
+
+  it("never writes over a person's dismissal: the close is refused and the sync dismisses the issue", async () => {
+    const root = await temp('file-human');
+    const dir = join(root, 'findings');
+    const config = configFor(dir);
+    const { workspace } = await workspaceWith(root);
+    await runPublisher(root, config, { createRuntime: publishingRuntime });
+    const path = join(dir, 'dd463fcef9ed5679.json');
+    const file = JSON.parse(await readFile(path, 'utf8')) as FindingFile;
+    await writeFile(path, JSON.stringify({ ...file, status: ' Dismissed ', reason: 'By design.' }));
+    // A recheck closes the issue as fixed before the next sync.
+    const logs: string[] = [];
+    const fixed: Issue = { ...(await workspace.readIssue('iss_1'))!, status: 'fixed' };
+    await closeFinding(root, config, fixed, { onLog: (line) => logs.push(line) });
+    expect(logs.join('\n')).toContain('dismissed by a person');
+    expect((await findings(dir))[0]).toMatchObject({ status: ' Dismissed ', reason: 'By design.' });
+    expect(await syncFindings(root, config)).toEqual({ changed: ['iss_1'] });
+    expect((await workspace.readIssue('iss_1'))?.status).toBe('dismissed');
+  });
+
+  it('leaves the issue alone for a finding with an unknown status, a broken file or a missing file, and says so', async () => {
+    const root = await temp('file-broken');
+    const dir = join(root, 'findings');
+    const logs: string[] = [];
+    const config = configFor(dir);
+    const { workspace } = await workspaceWith(root, { evidence: { screenshot: 'gone.png' } });
+    expect(
+      await runPublisher(root, config, { createRuntime: publishingRuntime, onLog: (line) => logs.push(line) }),
+    ).toMatchObject([{ kind: 'issue' }]);
+    expect(logs.join('\n')).toContain('Left out a screenshot');
+    const path = join(dir, 'dd463fcef9ed5679.json');
+    const file = JSON.parse(await readFile(path, 'utf8')) as FindingFile;
+    await writeFile(path, JSON.stringify({ ...file, status: 'wontfix' }));
+    await writeFile(join(dir, 'broken.json'), '{ not json');
+    const onLog = (line: string) => logs.push(line);
+    expect(await syncFindings(root, config, { onLog })).toEqual({ changed: [] });
+    expect((await workspace.readIssue('iss_1'))?.status).toBe('filed');
+    expect(logs.join('\n')).toContain('status "wontfix"');
+    expect(logs.join('\n')).toContain('broken.json is not valid JSON');
+    await rm(path);
+    expect(await syncFindings(root, config, { onLog })).toEqual({ changed: [] });
+    expect(logs.join('\n')).toContain('no longer on the findings directory');
+    await closeFinding(root, config, { ...(await workspace.readIssue('iss_1'))!, status: 'fixed' }, { onLog });
+    expect(logs.join('\n')).toContain('is gone');
   });
 
   it('closes a fixed finding and reopens a regression, each with its evidence in the history', async () => {
