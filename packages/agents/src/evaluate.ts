@@ -5,7 +5,7 @@ import { type Candidate, fingerprint, type Issue, paths, type RoutineStep, short
 import { diff } from '@bugpatrol/diff';
 import type { Observation } from '@bugpatrol/drivers';
 import { evaluateAll, type InvariantViolation, RULES, type ScreenSnapshot } from '@bugpatrol/invariants';
-import { closeOnGitHub } from './github.js';
+import { closeFinding } from './publishers/index.js';
 import type { AgentSession } from './session.js';
 
 const NATIVE_DISABLED = [
@@ -265,7 +265,7 @@ export async function closeAbsentChecks(
     };
     await session.workspace.saveIssue(updated);
     if (fixed) {
-      await closeOnGitHub(session.root, session.config, updated);
+      await closeFinding(session.root, session.config, updated);
       closed.push(issue.id);
       session.emit({ kind: 'issue', summary: `Fixed: ${issue.title}` });
     }

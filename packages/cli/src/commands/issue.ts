@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { closeOnGitHub, dismissedFingerprints, Workspace } from '@bugpatrol/agents';
+import { closeFinding, dismissedFingerprints, Workspace } from '@bugpatrol/agents';
 import { type BugpatrolConfig, ConfigError, fitLesson, type Issue } from '@bugpatrol/core';
 
 /**
@@ -48,7 +48,7 @@ export async function runIssueCommand(
     const at = new Date().toISOString();
     const dismissed: Issue = { ...issue, status: 'dismissed', closedBy: { by, reason, at } };
     await workspace.saveIssue(dismissed);
-    if (config) await closeOnGitHub(root, config, dismissed, undefined, log);
+    if (config) await closeFinding(root, config, dismissed, { onLog: log });
     await workspace.recordTriage(await dismissedFingerprints(workspace, issue, reason, at));
     await workspace.upsertLessons([
       {

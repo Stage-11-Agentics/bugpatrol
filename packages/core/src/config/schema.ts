@@ -348,6 +348,10 @@ export const AGENT_CHECKS = [
 ] as const;
 export type AgentCheck = (typeof AGENT_CHECKS)[number];
 
+/** Where the publish step files findings (`agents.publisher.use`). */
+export const PUBLISHERS = ['github'] as const;
+export type PublisherName = (typeof PUBLISHERS)[number];
+
 export const agentsSchema = z
   .object({
     /** Automatic checks on each recorded screen, for example [usability/contrast, usability/tap-target]. */
@@ -432,6 +436,16 @@ export const agentsSchema = z
           .default({}),
       })
       .default({}),
+    /**
+     * Where findings go. Unset: GitHub when agents.github.enabled is on, else
+     * nowhere. `use: github` turns agents.github on. Any other publisher keeps
+     * gh out of reach: Bugpatrol never runs it for that config.
+     */
+    publisher: z
+      .object({
+        use: z.enum(PUBLISHERS).optional(),
+      })
+      .default({}),
     /** `bugpatrol review <pr>`. */
     review: z
       .object({
@@ -513,7 +527,24 @@ export const agentsSchema = z
       })
       .default({}),
   })
+  .superRefine((agents, ctx) => {
+    const use = agents.publisher.use;
+    if (use && use !== 'github' && agents.github.enabled)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['github', 'enabled'],
+        message: `agents.publisher.use is ${use}, and Bugpatrol publishes to one place. Remove agents.github.enabled.`,
+      });
+  })
+  .transform((agents) =>
+    agents.publisher.use === 'github' ? { ...agents, github: { ...agents.github, enabled: true } } : agents,
+  )
   .default({});
+
+/** The publisher this config selects, or undefined when nothing is published. */
+export function publisherOf(config: { agents: AgentsConfig }): PublisherName | undefined {
+  return config.agents.publisher.use ?? (config.agents.github.enabled ? 'github' : undefined);
+}
 
 export const bugpatrolConfigSchema = z
   .object({

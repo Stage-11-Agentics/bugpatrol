@@ -3,7 +3,7 @@ import { access } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { type BugpatrolConfig, ciAttempts, type FixAttempt, type FixProposal } from '@bugpatrol/core';
-import { defaultGh, type Gh, ghReady, resolveRepo } from '../github.js';
+import { type Gh, ghFor, ghReady, resolveRepo } from '../github.js';
 import { fixerSystem } from '../prompts.js';
 import { createRuntime as makeRuntime } from '../runtime/index.js';
 import { AgentSession } from '../session.js';
@@ -101,7 +101,7 @@ export async function watchCi(
   const problems: string[] = [];
   const settings = config.agents.github.ci;
   if (!config.agents.github.enabled || !settings.enabled) return { problems };
-  const gh = deps.gh ?? defaultGh;
+  const gh = deps.gh ?? ghFor(config);
   const ready = await ghReady(gh);
   if (!ready.ok) {
     deps.onLog?.(ready.reason);

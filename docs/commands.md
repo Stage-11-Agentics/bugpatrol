@@ -27,7 +27,7 @@ Run each command in your repo. Bugpatrol finds the `.bugpatrol/` folder in the c
 | `bugpatrol memory list [--role r]` | Show the lessons that the agents learned |
 | `bugpatrol memory add --role r "text" [--scope s]` | Add a lesson yourself |
 | `bugpatrol memory remove <id>` · `retire <id> --reason "..."` | Delete or retire a lesson |
-| `bugpatrol github sync` | Read the state of each PR and issue from GitHub |
+| `bugpatrol sync` | Read the state of each filed finding back from the publisher (also `bugpatrol github sync`) |
 | `bugpatrol worktrees clean` | Remove the worktrees of merged, closed, or finished fixes |
 
 ## Dashboard and setup

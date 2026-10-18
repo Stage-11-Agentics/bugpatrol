@@ -19,7 +19,7 @@ import {
 } from '@bugpatrol/core';
 import { type Driver, createDriver as makeDriver } from '@bugpatrol/drivers';
 import { type Capabilities, detectCapabilities } from '../capabilities.js';
-import { defaultGh, ensureAssetsBranch, type Gh, ghReady, limitBody, resolveRepo, uploadImage } from '../github.js';
+import { ensureAssetsBranch, type Gh, ghFor, ghReady, limitBody, resolveRepo, uploadImage } from '../github.js';
 import { type AppGuide, noGuide, readGuide } from '../guide.js';
 import { startApp } from '../lifecycle.js';
 import { withSessionLogs } from '../logs.js';
@@ -1223,7 +1223,7 @@ export async function reviewPullRequest(
       'GitHub is off. Set agents.github.enabled: true in .bugpatrol/bugpatrol.yml, ' +
         'or run `bugpatrol review <pr> --dry-run` to write the review to .bugpatrol/runs/reviews/ only.',
     );
-  const gh = opts.gh ?? defaultGh;
+  const gh = opts.gh ?? ghFor(config);
   const ready = await ghReady(gh);
   if (!ready.ok) throw new ConfigError(ready.reason.replace('GitHub publish skipped', 'Review stopped'));
   const workspace = new Workspace(root);

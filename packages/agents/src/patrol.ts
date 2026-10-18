@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process';
 import { relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { type AgentsFile, type BugpatrolConfig, paths } from '@bugpatrol/core';
+import { type AgentsFile, type BugpatrolConfig, paths, publisherOf } from '@bugpatrol/core';
 import { type Driver, createDriver as makeDriver } from '@bugpatrol/drivers';
-import { syncGitHub } from './github.js';
 import { startApp } from './lifecycle.js';
 import { withSessionLogs } from './logs.js';
+import { syncFindings } from './publishers/index.js';
 import { watchCi } from './roles/ci.js';
 import { runExplorer } from './roles/explorer.js';
 import { runJudge } from './roles/judge.js';
@@ -179,7 +179,7 @@ export async function runPatrol(options: PatrolOptions): Promise<PatrolResult> {
       }
       await workspace.setPatrol({ state: 'running', cycle, startedAt: new Date().toISOString() });
       await pullSource(root, config, options.onLog);
-      if (config.agents.github.enabled) await syncGitHub(root, config, { onLog: options.onLog });
+      await syncFindings(root, config, { onLog: options.onLog });
       await cleanWorktrees(root, config, { onLog: options.onLog });
       const commit = await sourceCommit(root, config);
       // An old commit needs no new explore or judge. The work that is not done
@@ -282,7 +282,7 @@ export async function runPatrol(options: PatrolOptions): Promise<PatrolResult> {
       }
       // Only a failed test run tests the commit again. A red CI check is the PR's problem, not the cycle's.
       const cycleFailed = problems.length > before;
-      if (!interrupted && config.agents.github.enabled)
+      if (!interrupted && publisherOf(config))
         await runPublisher(root, config, {
           createRuntime: options.createRuntime,
           onLog: options.onLog,
@@ -298,7 +298,7 @@ export async function runPatrol(options: PatrolOptions): Promise<PatrolResult> {
         });
         problems.push(...ci.problems.map((problem) => `Cycle ${cycle}: ${problem}`));
       }
-      if (!interrupted && config.agents.github.enabled) await syncGitHub(root, config, { onLog: options.onLog });
+      if (!interrupted) await syncFindings(root, config, { onLog: options.onLog });
       // A cycle with a problem tests the commit again next time.
       if (!interrupted && fresh && commit && !cycleFailed) {
         tested = commit;

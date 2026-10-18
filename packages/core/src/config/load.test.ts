@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ConfigError } from '../errors.js';
 import { parseConfig } from './load.js';
+import { publisherOf } from './schema.js';
 
 const minimal = { version: 1, run: { command: 'pnpm dev', url: 'http://localhost:3000' } };
 
@@ -25,6 +26,16 @@ describe('parseConfig', () => {
     expect(review([bench]).agents.review.benches).toMatchObject([{ ...bench, better: 'lower', runs: 5 }]);
     expect(() => review([{ ...bench, parse: '([' }])).toThrow(ConfigError);
     expect(() => review([bench, bench])).toThrow(ConfigError);
+  });
+
+  it('selects the publisher explicitly, and GitHub only when it is on', () => {
+    expect(publisherOf(parseConfig(minimal))).toBeUndefined();
+    expect(publisherOf(parseConfig({ ...minimal, agents: { github: { enabled: true } } }))).toBe('github');
+    const named = parseConfig({ ...minimal, agents: { publisher: { use: 'github' } } });
+    expect(publisherOf(named)).toBe('github');
+    // The GitHub steps (sync, CI, review) read agents.github.enabled.
+    expect(named.agents.github.enabled).toBe(true);
+    expect(() => parseConfig({ ...minimal, agents: { publisher: { use: 'jira' } } })).toThrow(ConfigError);
   });
 
   it('rejects an unknown version rather than guessing', () => {

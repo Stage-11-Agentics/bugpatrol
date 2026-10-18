@@ -15,7 +15,7 @@ import {
   runPublisher,
   runtimeProblem,
   startApp,
-  syncGitHub,
+  syncFindings,
   Vars,
   Workspace,
   watchCi,
@@ -29,6 +29,7 @@ import {
   ExitCode,
   formatUsage,
   InfrastructureError,
+  publisherOf,
 } from '@bugpatrol/core';
 import { createDriver } from '@bugpatrol/drivers';
 import { exitCodeForReview } from './run.js';
@@ -197,9 +198,9 @@ export async function runAgentCommand(
     return;
   }
   if (command === 'publish') {
-    if (!flags.dryRun && !config.agents.github.enabled) {
+    if (!flags.dryRun && !publisherOf(config)) {
       throw new ConfigError(
-        'GitHub is off. Set agents.github.enabled: true in .bugpatrol/bugpatrol.yml, ' +
+        'Nothing publishes. Set agents.publisher.use (or agents.github.enabled: true) in .bugpatrol/bugpatrol.yml, ' +
           'or run `bugpatrol publish --dry-run` to write the reports to .bugpatrol/runs/publish/ only.',
       );
     }
@@ -208,11 +209,11 @@ export async function runAgentCommand(
       issueIds: flags.issue as string[] | undefined,
       dryRun: Boolean(flags.dryRun),
     });
-    if (!flags.dryRun) await syncGitHub(root, config, { onLog: log });
+    if (!flags.dryRun) await syncFindings(root, config, { onLog: log });
     if (!outcomes.length) {
       log(
-        `Nothing to publish. Bugpatrol opens a PR for each fix that has no PR yet, and a GitHub issue for each open ` +
-          `issue at ${config.agents.github.issueMinSeverity} or worse that has no fix and no GitHub issue.`,
+        `Nothing to publish. Bugpatrol opens a PR for each fix that has no PR yet, and files each open issue ` +
+          `at ${config.agents.github.issueMinSeverity} or worse that has no fix and is not filed yet.`,
       );
       return;
     }
@@ -226,12 +227,13 @@ export async function runAgentCommand(
             ? flags.dryRun
               ? 'issue draft'
               : 'issue'
-            : 'skipped';
+            : item.kind;
       log(`  ${kind.padEnd(11)} ${item.issueId}  ${item.url ?? item.reason ?? ''}`);
     }
     const count = (kind: string) => outcomes.filter((item) => item.kind === kind).length;
     log(
-      `${flags.dryRun ? 'Wrote' : 'Opened'} ${count('pr')} PR(s) and ${count('issue')} issue(s); skipped ${count('skipped')}.`,
+      `${flags.dryRun ? 'Wrote' : 'Opened'} ${count('pr')} PR(s) and ${count('issue')} issue(s); skipped ${count('skipped')}; ` +
+        `linked ${count('linked')} to a filed finding; reopened ${count('reopened')}.`,
     );
     return;
   }

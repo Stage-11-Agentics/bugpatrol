@@ -6,7 +6,7 @@ import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { type BugpatrolConfig, type FixProposal, fitLesson, type Issue, judgedRetests } from '@bugpatrol/core';
 import { commitFix } from './roles/fixer.js';
-import { dismissedFingerprints, Workspace } from './workspace.js';
+import { dismissByTracker, Workspace } from './workspace.js';
 
 export type Gh = (args: string[], opts?: { cwd?: string; input?: string }) => Promise<string>;
 
@@ -18,6 +18,20 @@ export const defaultGh: Gh = (args, opts) =>
     });
     child.stdin?.end(opts?.input);
   });
+
+/**
+ * The gh this config may run. A config that names another publisher gets a
+ * gh that refuses before it starts a process, so it never reaches GitHub.
+ */
+export function ghFor(config: BugpatrolConfig): Gh {
+  const use = config.agents.publisher.use;
+  if (!use || use === 'github') return defaultGh;
+  return async (args) => {
+    throw new Error(
+      `agents.publisher.use is ${use}: Bugpatrol does not run gh for this config (refused: gh ${args.join(' ')}).`,
+    );
+  };
+}
 
 const git = async (cwd: string, ...args: string[]) =>
   (await promisify(execFile)('git', args, { cwd, maxBuffer: 16 * 1024 * 1024 })).stdout.trim();
@@ -122,7 +136,7 @@ export async function syncGitHub(
 ): Promise<{ changed: string[] }> {
   const changed = new Set<string>();
   if (!config.agents.github.enabled) return { changed: [] };
-  const gh = deps.gh ?? defaultGh;
+  const gh = deps.gh ?? ghFor(config);
   const ready = await ghReady(gh);
   if (!ready.ok) {
     deps.onLog?.(ready.reason);
@@ -219,19 +233,7 @@ export async function syncGitHub(
     if (transition) {
       changed.add(issue.id);
       if (state === 'closed' && stateReason === 'not_planned') {
-        const reason = 'Closed on GitHub as not planned.';
-        const at = remote.closedAt ?? now;
-        issue.status = 'dismissed';
-        issue.closedBy = { by: 'GitHub', reason, at };
-        await workspace.recordTriage(await dismissedFingerprints(workspace, issue, reason, at));
-        await workspace.upsertLessons([
-          {
-            role: 'judge',
-            source: 'human',
-            scope: issue.screenId,
-            text: fitLesson(`Not a bug: ${issue.title} — ${reason}`),
-          },
-        ]);
+        await dismissByTracker(workspace, issue, 'GitHub', 'Closed on GitHub as not planned.', remote.closedAt ?? now);
       } else if (state === 'closed' && stateReason === 'completed') {
         issue.status = 'fixed';
         issue.closedBy = { by: 'GitHub', reason: 'Closed on GitHub as completed.', at: remote.closedAt ?? now };
@@ -416,31 +418,4 @@ export async function closeIssue(
   reason: 'completed' | 'not planned',
 ): Promise<void> {
   await gh(['issue', 'close', String(number), '--repo', repo, '--comment', comment, '--reason', reason]);
-}
-
-export async function closeOnGitHub(
-  root: string,
-  config: BugpatrolConfig,
-  issue: Issue,
-  gh: Gh = defaultGh,
-  onLog: (message: string) => void = console.error,
-): Promise<void> {
-  if (!config.agents.github.enabled || !issue.github) return;
-  try {
-    const ready = await ghReady(gh);
-    if (!ready.ok) {
-      onLog(ready.reason);
-      return;
-    }
-    const { repo } = await resolveRepo(gh, config, resolve(root, config.app.source));
-    await closeIssue(
-      gh,
-      repo,
-      issue.github.number,
-      issue.closedBy?.reason ?? 'Fixed by Bugpatrol',
-      issue.status === 'dismissed' ? 'not planned' : 'completed',
-    );
-  } catch (error) {
-    onLog(`GitHub close failed: ${String(error)}`);
-  }
 }
